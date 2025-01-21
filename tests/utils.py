@@ -11,4 +11,4 @@ def compare_dicts(a: dict, b: dict, ignore_keys: Iterable | None = None):
         if isinstance(v, dict):
             compare_dicts(v, b[k])
             continue
-        assert b[k] == v, f"b[{k}] is '{b[k]}' != '{v}" ""
+        assert b[k] == v, f"b[{k}] is '{b[k]}' != '{v}"
