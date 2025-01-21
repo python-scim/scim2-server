@@ -433,9 +433,8 @@ class SCIMProvider:
         if "filter" in request.args:
             raise Forbidden
 
-    def call_service_provider_config(self, request: Request, **kwargs):
-        """Return the ServiceProviderConfig."""
-        self.forbid_filter(request)
+    def get_service_provider_config(self):
+        """Build a ServiceProviderConfig object describing the server configuration."""
         auth_scheme = (
             []
             if not self.bearer_tokens
@@ -448,22 +447,26 @@ class SCIMProvider:
                 )
             ]
         )
-        return self.make_response(
-            ServiceProviderConfig(
-                documentation_uri="https://www.example.com/",
-                patch=Patch(supported=True),
-                bulk=Bulk(supported=False),
-                filter=Filter(supported=True, max_results=1000),
-                change_password=ChangePassword(supported=True),
-                sort=Sort(supported=True),
-                etag=ETag(supported=True),
-                authentication_schemes=auth_scheme,
-                meta=Meta(
-                    resource_type="ServiceProviderConfig",
-                    location=request.url,
-                ),
-            ).model_dump()
+        return ServiceProviderConfig(
+            documentation_uri="https://www.example.com/",
+            patch=Patch(supported=True),
+            bulk=Bulk(supported=False),
+            filter=Filter(supported=True, max_results=1000),
+            change_password=ChangePassword(supported=True),
+            sort=Sort(supported=True),
+            etag=ETag(supported=True),
+            authentication_schemes=auth_scheme,
+            meta=Meta(
+                resource_type="ServiceProviderConfig",
+            ),
         )
+
+    def call_service_provider_config(self, request: Request, **kwargs):
+        """Return the ServiceProviderConfig."""
+        self.forbid_filter(request)
+        spc = self.get_service_provider_config()
+        spc.meta.location = request.url
+        return self.make_response(spc.model_dump())
 
     def call_resource_type(self, request: Request, resource_type: str, **kwargs):
         """Return a single resource type."""
