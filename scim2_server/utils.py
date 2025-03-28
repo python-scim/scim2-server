@@ -3,6 +3,7 @@ import importlib.resources
 import json
 import re
 import sys
+from inspect import isclass
 from typing import Any
 
 from pydantic import EmailStr
@@ -71,7 +72,9 @@ def merge_resources(target: Resource, updates: BaseModel):
         setattr(target, set_attribute, new_value)
 
 
-def get_by_alias(r: BaseModel, scim_name: str, allow_none: bool = False) -> str | None:
+def get_by_alias(
+    resource: BaseModel, scim_name: str, allow_none: bool = False
+) -> str | None:
     """Return the pydantic attribute name for a BaseModel and given SCIM attribute name.
 
     :param r: BaseModel
@@ -81,16 +84,17 @@ def get_by_alias(r: BaseModel, scim_name: str, allow_none: bool = False) -> str 
     :raises SCIMException: If no attribute is found and allow_none is
         False
     """
+    klass = resource.__class__ if not isclass(resource) else resource
     try:
         return next(
-            k
-            for k, v in r.model_fields.items()
-            if v.serialization_alias.lower() == scim_name.lower()
+            key
+            for key, value in klass.model_fields.items()
+            if value.serialization_alias.lower() == scim_name.lower()
         )
-    except StopIteration as e:
+    except StopIteration as exc:
         if allow_none:
             return None
-        raise SCIMException(Error.make_no_target_error()) from e
+        raise SCIMException(Error.make_no_target_error()) from exc
 
 
 def get_schemas(resource: Resource) -> list[str]:
@@ -99,7 +103,7 @@ def get_schemas(resource: Resource) -> list[str]:
     Note that this may include schemas the resource does not currently
     have (such as missing optional schema extensions).
     """
-    return resource.model_fields["schemas"].default
+    return resource.__class__.model_fields["schemas"].default
 
 
 def get_or_create(
