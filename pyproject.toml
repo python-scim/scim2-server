@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scim2-server"
-version = "0.1.3"
+version = "0.1.6"
 description = "Lightweight SCIM2 server prototype"
 authors = [
     {name="Yaal Coop", email="contact@yaal.coop"},
