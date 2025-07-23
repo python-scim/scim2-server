@@ -71,7 +71,8 @@ def evaluate_filter(
                 value = resolved.get_values()
             else:
                 value = [
-                    getattr(v, get_by_alias(v, sub_attribute_name)) for v in resolved
+                    getattr(v, get_by_alias(type(v), sub_attribute_name))
+                    for v in resolved
                 ]
 
             compare_value = None

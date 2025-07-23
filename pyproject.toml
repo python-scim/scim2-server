@@ -30,7 +30,7 @@ classifiers = [
 requires-python = ">= 3.10"
 dependencies = [
     "scim2-filter-parser>=0.7.0",
-    "scim2-models>=0.2.4",
+    "scim2-models>=0.4.1",
     "werkzeug>=3.0.3",
 ]
 

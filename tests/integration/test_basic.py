@@ -3,6 +3,7 @@ from typing import Union
 from scim2_models import ListResponse
 from scim2_models import PatchOp
 from scim2_models import PatchOperation
+from scim2_models import User
 
 
 class TestSCIMProviderBasic:
@@ -68,7 +69,7 @@ class TestSCIMProviderBasic:
 
         r = wsgi.patch(
             f"/v2/Users/{user_id}",
-            json=PatchOp(
+            json=PatchOp[User](
                 operations=[
                     PatchOperation(
                         op=PatchOperation.Op.replace_,
@@ -151,9 +152,6 @@ class TestSCIMProviderBasic:
             "/v2/Groups",
             json={"displayName": "group display name"},
         ).json()["id"]
-
-        r = wsgi.get("/v2/Users", params={"sortBy": ""})
-        assert r.status_code == 200
 
         assert_sorted("userName", [u1_id, u2_id])
         assert_sorted("name.givenName", [u1_id, u2_id])

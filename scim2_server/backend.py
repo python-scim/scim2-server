@@ -195,8 +195,11 @@ class InMemoryBackend(Backend):
 
         def get_attribute(self, resource: Resource):
             if self.schema is not None:
-                resource = getattr(resource, get_by_alias(resource, self.schema))
-            result = getattr(resource, get_by_alias(resource, self.attribute_name))
+                schema_field = get_by_alias(type(resource), self.schema)
+                resource = getattr(resource, schema_field)
+
+            attribute_field = get_by_alias(type(resource), self.attribute_name)
+            result = getattr(resource, attribute_field)
             if not self.case_exact:
                 result = result.lower()
             return result

@@ -281,7 +281,6 @@ class TestUtils:
             resource_type="User",
             location="/v2/Users/foo",
         )
-        user.mark_with_schema()
         user.model_dump(scim_ctx=Context.RESOURCE_CREATION_RESPONSE)
 
     def test_dump_extension(self, provider):

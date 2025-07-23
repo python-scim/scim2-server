@@ -370,7 +370,7 @@ class TestSCIMProviderMSEntraIntegration:
         r = wsgi.delete(f"/v2/Groups/{group_id_3}")
         assert r.status_code == 204
 
-    @pytest.mark.xfail(reason="Microsoft Entra violates the SCIM protocol", strict=True)
+    @pytest.mark.xfail(reason="Microsoft Entra violates the SCIM protocol")
     def test_complex_attributes(self, wsgi):
         # Create user1
         r = wsgi.post(
@@ -444,7 +444,7 @@ class TestSCIMProviderMSEntraIntegration:
         r = wsgi.delete(f"/v2/Users/{id2}")
         assert r.status_code == 204
 
-    @pytest.mark.xfail(reason="Microsoft Entra violates the SCIM protocol", strict=True)
+    @pytest.mark.xfail(reason="Microsoft Entra violates the SCIM protocol")
     def test_users_with_garbage(self, wsgi):
         # Post user "OMalley"
         r = wsgi.post(

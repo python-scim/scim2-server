@@ -143,7 +143,7 @@ class Operator:
     def match_multi_valued_attribute_sub(
         self, attribute: str, condition: str, model: BaseModel, sub_attribute: str
     ):
-        attribute_name = get_by_alias(model, attribute)
+        attribute_name = get_by_alias(type(model), attribute)
         multi_valued_attribute = get_or_create(model, attribute_name, True)
         if not isinstance(multi_valued_attribute, list):
             raise SCIMException(Error.make_invalid_path_error())
@@ -159,7 +159,7 @@ class Operator:
     ):
         if self.REQUIRES_VALUE and not isinstance(self.value, dict):
             raise SCIMException(Error.make_invalid_value_error())
-        attribute_name = get_by_alias(model, attribute)
+        attribute_name = get_by_alias(type(model), attribute)
         multi_valued_attribute = get_or_create(
             model, attribute_name, self.REQUIRES_VALUE
         )
@@ -187,7 +187,7 @@ class Operator:
 
     def match_complex_attribute(self, attribute: str, model: BaseModel, sub_path: str):
         complex_attribute = get_or_create(
-            model, get_by_alias(model, attribute), self.REQUIRES_VALUE
+            model, get_by_alias(type(model), attribute), self.REQUIRES_VALUE
         )
         if isinstance(complex_attribute, list) and complex_attribute:
             for value in complex_attribute:
@@ -219,7 +219,7 @@ class AddOperator(Operator):
 
     @classmethod
     def operation(cls, model: BaseModel, attribute: str, value: Any):
-        alias = get_by_alias(model, attribute)
+        alias = get_by_alias(type(model), attribute)
         if model.get_field_multiplicity(alias) and isinstance(value, list):
             for v in value:
                 cls.operation(model, attribute, v)
@@ -257,7 +257,7 @@ class RemoveOperator(Operator):
 
     @classmethod
     def operation(cls, model: BaseModel, attribute: str, value: Any):
-        alias = get_by_alias(model, attribute)
+        alias = get_by_alias(type(model), attribute)
         existing_value = getattr(model, alias)
         if not existing_value:
             return
@@ -279,7 +279,7 @@ class ReplaceOperator(Operator):
 
     @classmethod
     def operation(cls, model: BaseModel, attribute: str, value: Any):
-        alias = get_by_alias(model, attribute)
+        alias = get_by_alias(type(model), attribute)
         if model.get_field_multiplicity(alias) and not isinstance(value, list):
             raise SCIMException(Error.make_invalid_value_error())
 
@@ -362,7 +362,7 @@ class ResolveOperator(Operator):
         sub_attribute: str | None,
         value: ResolveResult,
     ):
-        alias = get_by_alias(model, attribute)
+        alias = get_by_alias(type(model), attribute)
         value.model = model
         value.attribute = alias
         value.sub_attribute = sub_attribute
@@ -376,7 +376,7 @@ class ResolveOperator(Operator):
     def operation(
         cls, model: BaseModel, attribute: str, value: Any, index: int | None = None
     ):
-        alias = get_by_alias(model, attribute)
+        alias = get_by_alias(type(model), attribute)
         if index is None:
             value.add_result(model, alias)
         else:
@@ -414,7 +414,7 @@ class ResolveSortOperator(ResolveOperator):
         self.value = value
 
     def evaluate_value_for_complex(self, model: BaseModel, alias: str):
-        sub_attribute_alias = get_by_alias(model, alias, True)
+        sub_attribute_alias = get_by_alias(type(model), alias, True)
         if self.alias_forbidden(model, sub_attribute_alias):
             return
         case_exact = model.get_field_annotation(sub_attribute_alias, CaseExact)
@@ -429,7 +429,7 @@ class ResolveSortOperator(ResolveOperator):
                 return
             sub_attribute = path["sub_attribute"] or "value"
 
-            attribute_alias = get_by_alias(model, path["attribute"], True)
+            attribute_alias = get_by_alias(type(model), path["attribute"], True)
             if self.alias_forbidden(model, attribute_alias):
                 return
 

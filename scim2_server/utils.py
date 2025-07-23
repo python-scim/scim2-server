@@ -71,10 +71,12 @@ def merge_resources(target: Resource, updates: BaseModel):
         setattr(target, set_attribute, new_value)
 
 
-def get_by_alias(r: BaseModel, scim_name: str, allow_none: bool = False) -> str | None:
-    """Return the pydantic attribute name for a BaseModel and given SCIM attribute name.
+def get_by_alias(
+    r: type[BaseModel], scim_name: str, allow_none: bool = False
+) -> str | None:
+    """Return the pydantic attribute name for a BaseModel type and given SCIM attribute name.
 
-    :param r: BaseModel
+    :param r: BaseModel type
     :param scim_name: SCIM attribute name
     :param allow_none: Allow returning None if attribute is not found
     :return: pydantic attribute name
@@ -99,7 +101,7 @@ def get_schemas(resource: Resource) -> list[str]:
     Note that this may include schemas the resource does not currently
     have (such as missing optional schema extensions).
     """
-    return resource.model_fields["schemas"].default
+    return resource.__class__.model_fields["schemas"].default
 
 
 def get_or_create(
@@ -147,12 +149,14 @@ def handle_extension(resource: Resource, scim_name: str) -> tuple[BaseModel, str
                 scim_name = scim_name.lstrip(":")
                 if extension_model.lower() not in [s.lower() for s in resource.schemas]:
                     resource.schemas.append(extension_model)
-                ext = get_or_create(resource, get_by_alias(resource, extension_model))
+                ext = get_or_create(
+                    resource, get_by_alias(type(resource), extension_model)
+                )
                 return ext, scim_name
     return resource, scim_name
 
 
-def model_validate_from_dict(field_root_type: BaseModel, value: dict) -> Any:
+def model_validate_from_dict(field_root_type: type[BaseModel], value: dict) -> Any:
     """Workaround for some of the "special" requirements for MS Entra, mixing display and displayName in some cases."""
     if (
         "display" not in value

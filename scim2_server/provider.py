@@ -132,7 +132,7 @@ class SCIMProvider:
 
         resource.meta.location = location
 
-    def apply_patch_operation(self, resource: Resource, patch_operation: PatchOp):
+    def apply_patch_operation(self, resource: Resource, patch_operation):
         """Apply a PATCH operation to a resource."""
         for op in patch_operation.operations:
             patch_resource(resource, op)
@@ -213,7 +213,8 @@ class SCIMProvider:
                         # MS Entra sometimes passes a "name" attribute
                         del operation["name"]
 
-                patch_operation = PatchOp.model_validate(payload)
+                ResourceModel = self.backend.get_model(resource_type.id)
+                patch_operation = PatchOp[ResourceModel].model_validate(payload)
                 response_args = self.get_attrs_from_request(request)
                 resource = self.backend.get_resource(resource_type.id, resource_id)
                 if resource is None:
