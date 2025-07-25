@@ -59,9 +59,11 @@ def merge_resources(target: Resource, updates: BaseModel):
         if isinstance(getattr(updates, set_attribute), Extension):
             # This is a model extension, handle it as its own resource
             # and don't simply overwrite it
-            merge_resources(
-                getattr(target, set_attribute), getattr(updates, set_attribute)
-            )
+            target_extension = getattr(target, set_attribute)
+            if target_extension is None:
+                setattr(target, set_attribute, getattr(updates, set_attribute))
+            else:
+                merge_resources(target_extension, getattr(updates, set_attribute))
             continue
         new_value = getattr(updates, set_attribute)
         if mutability == Mutability.immutable and getattr(
