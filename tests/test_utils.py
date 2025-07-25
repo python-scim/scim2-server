@@ -368,3 +368,20 @@ class TestUtils:
         u = User()
         with pytest.raises(SCIMException, match="immutable"):
             get_or_create(u, "groups", True)
+
+    def test_merge_resources_none_extension(self):
+        """Test adding an extension parameter with merge_resources."""
+        target = User[EnterpriseUser](user_name="test")
+        assert target[EnterpriseUser] is None
+
+        payload = {
+            "userName": "test",
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+                "employeeNumber": "12345"
+            },
+        }
+        update = User[EnterpriseUser].model_validate(payload)
+
+        merge_resources(target, update)
+
+        assert target[EnterpriseUser].employee_number == "12345"
