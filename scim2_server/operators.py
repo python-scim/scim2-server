@@ -258,15 +258,16 @@ class RemoveOperator(Operator):
     @classmethod
     def operation(cls, model: BaseModel, attribute: str, value: Any):
         alias = get_by_alias(type(model), attribute)
-        existing_value = getattr(model, alias)
-        if not existing_value:
-            return
 
         if model.get_field_annotation(alias, Mutability) in (
             Mutability.read_only,
             Mutability.immutable,
         ):
             raise SCIMException(Error.make_mutability_error())
+
+        existing_value = getattr(model, alias)
+        if not existing_value:
+            return
 
         if model.get_field_annotation(alias, Required) == Required.true:
             raise SCIMException(Error.make_invalid_value_error())
