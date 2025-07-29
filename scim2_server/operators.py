@@ -103,43 +103,43 @@ class Operator:
         if not self.path:
             self.call_on_root(model)
             return self.do_return()
-        else:
-            model, path = self.parse_path(model)
 
-            match path:
-                case {
-                    "attribute": attribute,
-                    "condition": None,
-                    "sub_attribute": None,
-                }:
-                    self.match_attribute(attribute, model)
-                    return self.do_return()
-                case {
-                    "attribute": attribute,
-                    "condition": None,
-                    "sub_attribute": sub_path,
-                }:
-                    self.match_complex_attribute(attribute, model, sub_path)
-                    return self.do_return()
-                case {
-                    "attribute": attribute,
-                    "condition": condition,
-                    "sub_attribute": None,
-                }:
-                    self.match_multi_valued_attribute(attribute, condition, model)
-                    return self.do_return()
-                case {
-                    "attribute": attribute,
-                    "condition": condition,
-                    "sub_attribute": sub_attribute,
-                }:
-                    self.match_multi_valued_attribute_sub(
-                        attribute, condition, model, sub_attribute
-                    )
-                    return self.do_return()
-                case _:
-                    self.call_on_root(model)
-                    return self.do_return()
+        model, path = self.parse_path(model)
+
+        match path:
+            case {
+                "attribute": attribute,
+                "condition": None,
+                "sub_attribute": None,
+            }:
+                self.match_attribute(attribute, model)
+                return self.do_return()
+            case {
+                "attribute": attribute,
+                "condition": None,
+                "sub_attribute": sub_path,
+            }:
+                self.match_complex_attribute(attribute, model, sub_path)
+                return self.do_return()
+            case {
+                "attribute": attribute,
+                "condition": condition,
+                "sub_attribute": None,
+            }:
+                self.match_multi_valued_attribute(attribute, condition, model)
+                return self.do_return()
+            case {
+                "attribute": attribute,
+                "condition": condition,
+                "sub_attribute": sub_attribute,
+            }:
+                self.match_multi_valued_attribute_sub(
+                    attribute, condition, model, sub_attribute
+                )
+                return self.do_return()
+            case _:
+                self.call_on_root(model)
+                return self.do_return()
 
     def match_multi_valued_attribute_sub(
         self, attribute: str, condition: str, model: BaseModel, sub_attribute: str
