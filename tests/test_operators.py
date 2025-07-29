@@ -311,6 +311,14 @@ class TestOperators:
         ]
         assert u.EnterpriseUser.manager.value == "1234"
 
+    def test_add_operator_extension_root(self):
+        u = User[EnterpriseUser]()
+        AddOperator(
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+            {"employeeNumber": "1234"},
+        )(u)
+        assert u.EnterpriseUser.employee_number == "1234"
+
     def test_add_operator_extension_path(self):
         u = User[EnterpriseUser]()
         AddOperator(
@@ -422,6 +430,15 @@ class TestOperators:
         assert u.user_name == "foo"
         assert u.name == Name(formatted="Mr. Foo")
 
+    def test_replace_operator_extension_root_object(self):
+        u = User[EnterpriseUser](user_name="bar")
+        u.EnterpriseUser = EnterpriseUser(employee_number="4321")
+        ReplaceOperator(
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+            {"employeeNumber": "1234"},
+        )(u)
+        assert u.EnterpriseUser.employee_number == "1234"
+
     def test_replace_operator_overwrite_required_attribute(self):
         u = User(user_name="A")
         with pytest.raises(SCIMException, match="invalidValue"):
@@ -496,10 +513,10 @@ class TestOperators:
             Email(value="home@example.com", primary=False),
         ]
 
-    def test_remove_operator_extension(self):
+    def test_remove_operator_extension_root(self):
         u = User[EnterpriseUser]()
         u.EnterpriseUser = EnterpriseUser(employee_number="123")
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(SCIMException, match="noTarget"):
             RemoveOperator(
                 "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", None
             )(u)

@@ -138,7 +138,8 @@ class Operator:
                     )
                     return self.do_return()
                 case _:
-                    raise SCIMException(Error.make_invalid_path_error())
+                    self.call_on_root(model)
+                    return self.do_return()
 
     def match_multi_valued_attribute_sub(
         self, attribute: str, condition: str, model: BaseModel, sub_attribute: str
