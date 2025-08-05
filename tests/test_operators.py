@@ -468,6 +468,16 @@ class TestOperators:
         with pytest.raises(SCIMException, match="immutable"):
             RemoveOperator.operation(u, "groups", None)
 
+    def test_remove_operator_mutability_validation_on_empty_fields(self):
+        """Test that mutability constraints are enforced even on empty/unset fields."""
+        u = User(id="123")  # groups field is None/empty by default
+        with pytest.raises(SCIMException, match="mutability"):
+            RemoveOperator.operation(u, "groups", None)
+
+        u2 = User()  # id field is None/empty by default
+        with pytest.raises(SCIMException, match="mutability"):
+            RemoveOperator.operation(u2, "id", None)
+
     def test_remove_operator_root_object(self):
         u = User()
         with pytest.raises(SCIMException, match="noTarget"):
