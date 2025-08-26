@@ -46,10 +46,13 @@ dev = [
     "httpx>=0.27.0",
     "pytest>=8.2.2",
     "pytest-coverage>=0.0",
-    "pre-commit-uv>=4.1.4",
+    "prek>=0.1.0",
     "time-machine>=2.14.2",
     "tox-uv>=1.16.0",
 ]
+
+[tool.uv.build-backend]
+module-root = ""
 
 [tool.coverage.run]
 source = [
@@ -125,7 +128,7 @@ commands = [
 [tool.tox.env.style]
 runner = "uv-venv-runner"
 commands = [
-    ["pre-commit", "run", "--all-files", "--show-diff-on-failure"],
+    ["prek", "run", "--all-files", "--show-diff-on-failure"],
 ]
 
 [tool.tox.env.minversions]
