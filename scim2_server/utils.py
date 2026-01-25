@@ -97,15 +97,6 @@ def get_by_alias(
         raise SCIMException(Error.make_no_target_error()) from e
 
 
-def get_schemas(resource: Resource) -> list[str]:
-    """Return a list of all schemas possible for a given resource.
-
-    Note that this may include schemas the resource does not currently
-    have (such as missing optional schema extensions).
-    """
-    return resource.__class__.model_fields["schemas"].default
-
-
 def get_or_create(
     model: BaseModel, attribute_name: str, check_mutability: bool = False
 ):
@@ -138,7 +129,7 @@ def get_or_create(
 
 
 def handle_extension(resource: Resource, scim_name: str) -> tuple[BaseModel, str]:
-    default_schema = get_schemas(resource)[0].lower()
+    default_schema = str(resource.__class__.__schema__).lower()
     if scim_name.lower().startswith(default_schema):
         scim_name = scim_name[len(default_schema) :].lstrip(":")
         return resource, scim_name

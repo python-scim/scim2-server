@@ -278,7 +278,7 @@ class InMemoryBackend(Backend):
 
         if search_request.sort_by is not None:
             descending = search_request.sort_order == SearchRequest.SortOrder.descending
-            sort_operator = ResolveSortOperator(search_request.sort_by)
+            sort_operator = ResolveSortOperator(str(search_request.sort_by))
 
             # To ensure that unset attributes are sorted last (when ascending, as defined in the RFC),
             # we have to divide the result set into a set and unset subset.

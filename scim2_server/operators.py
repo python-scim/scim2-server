@@ -26,15 +26,16 @@ ATTRIBUTE_PATH_REGEX = re.compile(
 
 def patch_resource(resource: Resource, operation: PatchOperation):
     """Run a patch operation against a resource."""
+    path = str(operation.path) if operation.path else None
     match operation.op:
         case PatchOperation.Op.add:
-            operator = AddOperator(operation.path, operation.value)
+            operator = AddOperator(path, operation.value)
             operator(resource)
         case PatchOperation.Op.remove:
-            operator = RemoveOperator(operation.path, None)
+            operator = RemoveOperator(path, None)
             operator(resource)
         case _:  # PatchOperation.Op.replace
-            operator = ReplaceOperator(operation.path, operation.value)
+            operator = ReplaceOperator(path, operation.value)
             operator(resource)
 
 
