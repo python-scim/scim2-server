@@ -20,6 +20,7 @@ from scim2_models import PatchOp
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
+from scim2_models import SCIMException
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
@@ -39,7 +40,6 @@ from werkzeug.routing.exceptions import RequestRedirect
 
 from scim2_server.backend import Backend
 from scim2_server.operators import patch_resource
-from scim2_server.utils import SCIMException
 from scim2_server.utils import merge_resources
 
 
@@ -537,7 +537,7 @@ class SCIMProvider:
             return self.make_error(Error(status=e.code, detail=e.description))
         except SCIMException as e:
             self.log.exception(e)
-            return self.make_error(e.scim_error)
+            return self.make_error(e.to_error())
         except ValidationError as e:
             self.log.exception(e)
             return self.make_error(Error(status=400, detail=str(e)))

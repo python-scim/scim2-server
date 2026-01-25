@@ -8,19 +8,14 @@ from typing import Any
 from pydantic import EmailStr
 from pydantic import ValidationError
 from scim2_models import BaseModel
-from scim2_models import Error
 from scim2_models import Extension
+from scim2_models import InvalidValueException
 from scim2_models import Mutability
+from scim2_models import MutabilityException
+from scim2_models import NoTargetException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
-
-
-class SCIMException(Exception):
-    """A wrapper class, because an "Error" does not inherit from Exception and should not be raised."""
-
-    def __init__(self, scim_error: Error):
-        self.scim_error = scim_error
 
 
 def load_json_resource(json_name: str) -> list:
@@ -69,7 +64,7 @@ def merge_resources(target: Resource, updates: BaseModel):
         if mutability == Mutability.immutable and getattr(
             target, set_attribute
         ) not in (None, new_value):
-            raise SCIMException(Error.make_mutability_error())
+            raise MutabilityException()
         setattr(target, set_attribute, new_value)
 
 
@@ -82,8 +77,8 @@ def get_by_alias(
     :param scim_name: SCIM attribute name
     :param allow_none: Allow returning None if attribute is not found
     :return: pydantic attribute name
-    :raises SCIMException: If no attribute is found and allow_none is
-        False
+    :raises NoTargetException: If no attribute is found and allow_none
+        is False
     """
     try:
         return next(
@@ -94,7 +89,7 @@ def get_by_alias(
     except StopIteration as e:
         if allow_none:
             return None
-        raise SCIMException(Error.make_no_target_error()) from e
+        raise NoTargetException() from e
 
 
 def get_or_create(
@@ -107,7 +102,7 @@ def get_or_create(
     :param check_mutability: If True, validate that the attribute is
         mutable
     :return: A complex attribute model
-    :raises SCIMException: If attribute is not mutable and
+    :raises MutabilityException: If attribute is not mutable and
         check_mutability is True
     """
     if check_mutability:
@@ -115,7 +110,7 @@ def get_or_create(
             Mutability.read_only,
             Mutability.immutable,
         ):
-            raise SCIMException(Error.make_mutability_error())
+            raise MutabilityException()
     ret = getattr(model, attribute_name, None)
     if not ret:
         if model.get_field_multiplicity(attribute_name):
@@ -164,8 +159,8 @@ def model_validate_from_dict(field_root_type: type[BaseModel], value: dict) -> A
 def parse_new_value(model: BaseModel, attribute_name: str, value: Any) -> Any:
     """Given a model and attribute name, attempt to parse a new value so that the type matches the type expected by the model.
 
-    :raises SCIMException: If attribute can not be mapped to the
-        required type
+    :raises InvalidValueException: If attribute can not be mapped to
+        the required type
     """
     field_root_type = model.get_field_root_type(attribute_name)
     try:
@@ -195,5 +190,5 @@ def parse_new_value(model: BaseModel, attribute_name: str, value: Any) -> Any:
             else:
                 new_value = field_root_type(value)
     except (AttributeError, TypeError, ValueError, ValidationError) as e:
-        raise SCIMException(Error.make_invalid_value_error()) from e
+        raise InvalidValueException() from e
     return new_value

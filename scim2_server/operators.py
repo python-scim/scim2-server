@@ -5,15 +5,18 @@ from scim2_filter_parser.lexer import SCIMLexer
 from scim2_filter_parser.parser import SCIMParser
 from scim2_models import BaseModel
 from scim2_models import CaseExact
-from scim2_models import Error
+from scim2_models import InvalidPathException
+from scim2_models import InvalidValueException
 from scim2_models import Mutability
+from scim2_models import MutabilityException
+from scim2_models import NoTargetException
 from scim2_models import PatchOperation
 from scim2_models import Required
 from scim2_models import Resource
 from scim2_models import Returned
+from scim2_models import SensitiveException
 
 from scim2_server.filter import evaluate_filter
-from scim2_server.utils import SCIMException
 from scim2_server.utils import get_by_alias
 from scim2_server.utils import get_or_create
 from scim2_server.utils import handle_extension
@@ -55,7 +58,7 @@ def parse_attribute_path(attribute_path: str | None) -> dict[str, Any] | None:
 
     match = ATTRIBUTE_PATH_REGEX.match(attribute_path)
     if not match:
-        raise SCIMException(Error.make_invalid_path_error())
+        raise InvalidPathException()
     parse_attribute_path.cache[attribute_path] = match.groupdict()
     return match.groupdict()
 
@@ -148,7 +151,7 @@ class Operator:
         attribute_name = get_by_alias(type(model), attribute)
         multi_valued_attribute = get_or_create(model, attribute_name, True)
         if not isinstance(multi_valued_attribute, list):
-            raise SCIMException(Error.make_invalid_path_error())
+            raise InvalidPathException()
         token_stream = SCIMLexer().tokenize(condition)
         condition = SCIMParser().parse(token_stream)
         self.init_return(model, attribute_name, sub_attribute, self.value)
@@ -160,13 +163,13 @@ class Operator:
         self, attribute: str, condition: str, model: BaseModel
     ):
         if self.REQUIRES_VALUE and not isinstance(self.value, dict):
-            raise SCIMException(Error.make_invalid_value_error())
+            raise InvalidValueException()
         attribute_name = get_by_alias(type(model), attribute)
         multi_valued_attribute = get_or_create(
             model, attribute_name, self.REQUIRES_VALUE
         )
         if not isinstance(multi_valued_attribute, list):
-            raise SCIMException(Error.make_invalid_path_error())
+            raise InvalidPathException()
         token_stream = SCIMLexer().tokenize(condition)
         condition = SCIMParser().parse(token_stream)
         if self.REQUIRES_VALUE:
@@ -196,7 +199,7 @@ class Operator:
                 self.match_attribute(sub_path, value)
         else:
             if not isinstance(complex_attribute, BaseModel):
-                raise SCIMException(Error.make_invalid_path_error())
+                raise InvalidPathException()
             self.match_attribute(sub_path, complex_attribute)
 
     def match_attribute(self, attribute: str, model: BaseModel):
@@ -205,9 +208,9 @@ class Operator:
 
     def call_on_root(self, model: Resource):
         if not self.OPERATE_ON_ROOT:
-            raise SCIMException(Error.make_no_target_error())
+            raise NoTargetException()
         if not isinstance(self.value, dict):
-            raise SCIMException(Error.make_invalid_value_error())
+            raise InvalidValueException()
         for k, v in self.value.items():
             ext, scim_name = handle_extension(model, k)
             if ext == model:
@@ -233,7 +236,7 @@ class AddOperator(Operator):
             return
 
         if model.get_field_annotation(alias, Mutability) == Mutability.read_only:
-            raise SCIMException(Error.make_mutability_error())
+            raise MutabilityException()
 
         if model.get_field_multiplicity(alias):
             if getattr(model, alias) is None:
@@ -247,7 +250,7 @@ class AddOperator(Operator):
                 model.get_field_annotation(alias, Required) == Required.true
                 and not new_value
             ):
-                raise SCIMException(Error.make_invalid_value_error())
+                raise InvalidValueException()
             setattr(model, alias, new_value)
 
 
@@ -268,10 +271,10 @@ class RemoveOperator(Operator):
             Mutability.read_only,
             Mutability.immutable,
         ):
-            raise SCIMException(Error.make_mutability_error())
+            raise MutabilityException()
 
         if model.get_field_annotation(alias, Required) == Required.true:
-            raise SCIMException(Error.make_invalid_value_error())
+            raise InvalidValueException()
 
         setattr(model, alias, None)
 
@@ -283,7 +286,7 @@ class ReplaceOperator(Operator):
     def operation(cls, model: BaseModel, attribute: str, value: Any):
         alias = get_by_alias(type(model), attribute)
         if model.get_field_multiplicity(alias) and not isinstance(value, list):
-            raise SCIMException(Error.make_invalid_value_error())
+            raise InvalidValueException()
 
         existing_value = getattr(model, alias)
         new_value = parse_new_value(model, alias, value)
@@ -291,13 +294,13 @@ class ReplaceOperator(Operator):
             return
 
         if model.get_field_annotation(alias, Mutability) == Mutability.read_only:
-            raise SCIMException(Error.make_mutability_error())
+            raise MutabilityException()
 
         if (
             model.get_field_annotation(alias, Required) == Required.true
             and not new_value
         ):
-            raise SCIMException(Error.make_invalid_value_error())
+            raise InvalidValueException()
         setattr(model, alias, new_value)
 
 
@@ -372,7 +375,7 @@ class ResolveOperator(Operator):
             model.get_field_annotation(alias, Mutability) == Mutability.write_only
             or model.get_field_annotation(alias, Returned) == Returned.never
         ):
-            raise SCIMException(Error.make_sensitive_error())
+            raise SensitiveException()
 
     @classmethod
     def operation(

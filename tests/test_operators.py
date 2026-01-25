@@ -2,12 +2,17 @@ import base64
 import datetime
 
 import pytest
+from scim2_models import URN
 from scim2_models import BaseModel
 from scim2_models import CaseExact
 from scim2_models import Email
 from scim2_models import EnterpriseUser
 from scim2_models import GroupMembership
+from scim2_models import InvalidPathException
+from scim2_models import InvalidValueException
+from scim2_models import MutabilityException
 from scim2_models import Name
+from scim2_models import NoTargetException
 from scim2_models import Resource
 from scim2_models import User
 from scim2_models import X509Certificate
@@ -19,7 +24,6 @@ from scim2_server.operators import ResolveOperator
 from scim2_server.operators import ResolveResult
 from scim2_server.operators import ResolveSortOperator
 from scim2_server.operators import parse_attribute_path
-from scim2_server.utils import SCIMException
 
 
 class TestOperators:
@@ -45,11 +49,11 @@ class TestOperators:
             "condition": "x eq 5",
             "sub_attribute": "b",
         }
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(InvalidPathException):
             assert parse_attribute_path("%invalid$$path")
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(InvalidPathException):
             assert parse_attribute_path(".a..b[x]")
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(InvalidPathException):
             assert parse_attribute_path("\\x")
 
     def test_simple_add_operator_unset_single_valued(self):
@@ -84,7 +88,7 @@ class TestOperators:
 
     def test_simple_add_operator_immutable(self):
         u = User()
-        with pytest.raises(SCIMException, match="mutability"):
+        with pytest.raises(MutabilityException):
             AddOperator.operation(u, "id", "123")
         u.id = "123"
         AddOperator.operation(u, "id", "123")
@@ -92,11 +96,11 @@ class TestOperators:
 
     def test_simple_add_operator_invalid_value(self):
         u = User()
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator.operation(u, "userName", {})
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator.operation(u, "emails", "abc")
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator.operation(u, "emails", {"foo": 123})
 
     def test_simple_add_operator_bool_value_parsing(self):
@@ -136,7 +140,7 @@ class TestOperators:
 
     def test_add_operator_overwrite_required_attribute(self):
         u = User(user_name="A")
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator("userName", "")(u)
 
     def test_add_operator_multi_valued_list(self):
@@ -157,11 +161,11 @@ class TestOperators:
 
     def test_add_operator_root_object_invalid_value(self):
         u = User()
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator(None, "abc")(u)
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator(None, 1)(u)
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator(None, [1, 2, 3])(u)
 
     def test_add_operator_simple_attribute(self):
@@ -179,23 +183,23 @@ class TestOperators:
 
     def test_add_operator_complex_attribute_invalid_path(self):
         u = User()
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator('name[givenName eq "Foo"]', "foo")(u)
 
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(InvalidPathException):
             AddOperator('name[givenName eq "Foo"].formatted', "foo")(u)
 
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(InvalidPathException):
             AddOperator('name[givenName eq "Foo"]', {"formatted": "foo"})(u)
 
     def test_add_operator_multi_valued_attribute_invalid_path(self):
         u = User()
-        with pytest.raises(SCIMException, match="invalidPath"):
+        with pytest.raises(InvalidPathException):
             AddOperator("emails.value", "work@example.com")(u)
 
     def test_add_operator_multi_valued_attribute_mutability(self):
         u = User()
-        with pytest.raises(SCIMException, match="immutable"):
+        with pytest.raises(MutabilityException):
             AddOperator(
                 "groups",
                 {
@@ -264,7 +268,7 @@ class TestOperators:
         assert u.emails == [
             Email(value="work@example.com"),
         ]
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             AddOperator("name", "Mr. Foo")(u)
 
     def test_add_operator_binary_data(self):
@@ -278,7 +282,7 @@ class TestOperators:
 
     def test_add_operator_datetime(self):
         class Foo(Resource):
-            schemas: list[str] = ["urn:example:2.0:Foo"]
+            __schema__ = URN("urn:example:2.0:Foo")
             dt: datetime.datetime | None = None
 
         f = Foo()
@@ -401,7 +405,7 @@ class TestOperators:
 
     def test_simple_replace_operator_multi_valued_invalid_value(self):
         u = User(emails=[])
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             ReplaceOperator.operation(
                 u,
                 "emails",
@@ -410,7 +414,7 @@ class TestOperators:
 
     def test_simple_replace_operator_immutable(self):
         u = User()
-        with pytest.raises(SCIMException, match="mutability"):
+        with pytest.raises(MutabilityException):
             ReplaceOperator.operation(u, "id", "123")
         u.id = "123"
         ReplaceOperator.operation(u, "id", "123")
@@ -441,7 +445,7 @@ class TestOperators:
 
     def test_replace_operator_overwrite_required_attribute(self):
         u = User(user_name="A")
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             ReplaceOperator("userName", "")(u)
 
     def test_simple_remove_operator_unset_single_valued(self):
@@ -463,19 +467,19 @@ class TestOperators:
 
     def test_simple_remove_operator_immutable(self):
         u = User(id="123", groups=[GroupMembership()])
-        with pytest.raises(SCIMException, match="immutable"):
+        with pytest.raises(MutabilityException):
             RemoveOperator.operation(u, "id", None)
-        with pytest.raises(SCIMException, match="immutable"):
+        with pytest.raises(MutabilityException):
             RemoveOperator.operation(u, "groups", None)
 
     def test_remove_operator_root_object(self):
         u = User()
-        with pytest.raises(SCIMException, match="noTarget"):
+        with pytest.raises(NoTargetException):
             RemoveOperator("", None)(u)
 
     def test_remove_operator_required_attribute(self):
         u = User(user_name="A")
-        with pytest.raises(SCIMException, match="invalidValue"):
+        with pytest.raises(InvalidValueException):
             RemoveOperator("userName", None)(u)
 
     def test_remove_operator_complex_attribute(self):
@@ -516,7 +520,7 @@ class TestOperators:
     def test_remove_operator_extension_root(self):
         u = User[EnterpriseUser]()
         u.EnterpriseUser = EnterpriseUser(employee_number="123")
-        with pytest.raises(SCIMException, match="noTarget"):
+        with pytest.raises(NoTargetException):
             RemoveOperator(
                 "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", None
             )(u)
@@ -542,7 +546,7 @@ class TestOperators:
         u = User()
         assert self._resolve_value("userName", u) is None
         assert self._resolve_value("active", u) is None
-        with pytest.raises(SCIMException, match="noTarget"):
+        with pytest.raises(NoTargetException):
             self._resolve_value("invalidAttribute", u)
 
     def test_resolve_operator_simple_attribute(self):
