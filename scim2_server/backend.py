@@ -11,7 +11,6 @@ from scim2_filter_parser.parser import SCIMParser
 from scim2_models import Attribute
 from scim2_models import BaseModel
 from scim2_models import CaseExact
-from scim2_models import Error
 from scim2_models import Extension
 from scim2_models import Meta
 from scim2_models import Resource
@@ -19,11 +18,11 @@ from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
+from scim2_models import UniquenessException
 from werkzeug.http import generate_etag
 
 from scim2_server.filter import evaluate_filter
 from scim2_server.operators import ResolveSortOperator
-from scim2_server.utils import SCIMException
 from scim2_server.utils import get_by_alias
 
 
@@ -120,10 +119,9 @@ class Backend:
             Resources. The List must contain a copy of resources.
             Mutating elements in the List must not modify the data
             stored in the backend.
-        :raises SCIMException: If the backend only supports querying for
-            one resource type at a time, setting resource_type_id to
-            None the backend may raise a
-            SCIMException(Error.make_too_many_error()).
+        :raises TooManyException: If the backend only supports querying
+            for one resource type at a time, setting resource_type_id to
+            None the backend may raise TooManyException.
         """
         raise NotImplementedError
 
@@ -353,7 +351,7 @@ class InMemoryBackend(Backend):
                 if existing_resource.meta.resource_type == resource_type_id:
                     existing_value = unique_attribute.get_attribute(existing_resource)
                     if existing_value == new_value:
-                        raise SCIMException(Error.make_uniqueness_error())
+                        raise UniquenessException()
 
         self.resources.append(resource)
         return resource
@@ -392,7 +390,7 @@ class InMemoryBackend(Backend):
                             existing_resource
                         )
                         if existing_value == new_value:
-                            raise SCIMException(Error.make_uniqueness_error())
+                            raise UniquenessException()
 
             self.resources[found_res_idx] = updated_resource
             return updated_resource

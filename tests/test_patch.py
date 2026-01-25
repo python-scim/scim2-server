@@ -1,8 +1,8 @@
 import pytest
+from scim2_models import MutabilityException
 from scim2_models import PatchOperation
 
 from scim2_server.operators import patch_resource
-from scim2_server.utils import SCIMException
 
 
 class TestPatch:
@@ -42,7 +42,7 @@ class TestPatch:
             "id": "123",
             "userName": "Bar",
         }
-        with pytest.raises(SCIMException, match="mutability"):
+        with pytest.raises(MutabilityException):
             patch_resource(
                 user,
                 PatchOperation(

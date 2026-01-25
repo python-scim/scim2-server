@@ -3,9 +3,8 @@ from types import NoneType
 from scim2_filter_parser import ast as scim2ast
 from scim2_models import BaseModel
 from scim2_models import CaseExact
-from scim2_models import Error
+from scim2_models import InvalidFilterException
 
-from scim2_server.utils import SCIMException
 from scim2_server.utils import get_by_alias
 from scim2_server.utils import parse_new_value
 
@@ -125,4 +124,4 @@ def check_comparable_value(value):
     status code 400) with "scimType" of "invalidFilter"."
     """
     if isinstance(value, bytes | bool | NoneType):
-        raise SCIMException(Error.make_invalid_filter_error())
+        raise InvalidFilterException()

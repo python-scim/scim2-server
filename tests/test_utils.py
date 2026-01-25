@@ -3,17 +3,21 @@ from typing import Annotated
 import pytest
 from scim2_filter_parser.lexer import SCIMLexer
 from scim2_filter_parser.parser import SCIMParser
+from scim2_models import URN
 from scim2_models import Context
 from scim2_models import EnterpriseUser
+from scim2_models import InvalidFilterException
 from scim2_models import Meta
 from scim2_models import Mutability
+from scim2_models import MutabilityException
 from scim2_models import Name
+from scim2_models import NoTargetException
 from scim2_models import Resource
+from scim2_models import SensitiveException
 from scim2_models import User
 
 from scim2_server.filter import evaluate_filter
 from scim2_server.operators import ResolveOperator
-from scim2_server.utils import SCIMException
 from scim2_server.utils import get_or_create
 from scim2_server.utils import merge_resources
 
@@ -110,7 +114,7 @@ class TestUtils:
         assert evaluate('meta.created eq "2024-08-01T12:40:00Z"')
         assert evaluate('meta.created lt "2025-01-01T00:00:00Z"')
 
-        with pytest.raises(SCIMException, match="sensitive"):
+        with pytest.raises(SensitiveException):
             # Password is sensitive (never returned), filter must not match
             # to not reveal any information about the value
             assert not evaluate('password sw "(Rtk_"')
@@ -122,19 +126,19 @@ class TestUtils:
         assert evaluate('emails[value pr].type co "home"')
         assert not evaluate('emails[value pr].value co "x@example.com"')
 
-        with pytest.raises(SCIMException, match="noTarget"):
+        with pytest.raises(NoTargetException):
             assert not evaluate('name[type eq "foo"]')
 
-        with pytest.raises(SCIMException, match="invalidFilter"):
+        with pytest.raises(InvalidFilterException):
             assert not evaluate("active gt 5")
 
-        with pytest.raises(SCIMException, match="invalidFilter"):
+        with pytest.raises(InvalidFilterException):
             assert not evaluate("active lt 5")
 
-        with pytest.raises(SCIMException, match="invalidFilter"):
+        with pytest.raises(InvalidFilterException):
             assert not evaluate("active ge 5")
 
-        with pytest.raises(SCIMException, match="invalidFilter"):
+        with pytest.raises(InvalidFilterException):
             assert not evaluate("active le 5")
 
         # Filters based on examples from RFC 7644, Section 3.4.2.2
@@ -354,19 +358,19 @@ class TestUtils:
 
     def test_merge_resources_immutable(self):
         class Foo(Resource):
-            schemas: list[str] = ["urn:example:2.0:Foo"]
+            __schema__ = URN("urn:example:2.0:Foo")
             immutable_string: Annotated[str | None, Mutability.immutable] = None
 
         stored = Foo()
         merge_resources(stored, Foo(immutable_string="ABC"))
         assert stored.immutable_string == "ABC"
         merge_resources(stored, Foo(immutable_string="ABC"))
-        with pytest.raises(SCIMException, match="mutability"):
+        with pytest.raises(MutabilityException):
             merge_resources(stored, Foo(immutable_string="D"))
 
     def test_get_or_create_mutability(self):
         u = User()
-        with pytest.raises(SCIMException, match="immutable"):
+        with pytest.raises(MutabilityException):
             get_or_create(u, "groups", True)
 
     def test_merge_resources_none_extension(self):
