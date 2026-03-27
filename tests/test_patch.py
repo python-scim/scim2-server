@@ -1,6 +1,8 @@
 import pytest
+from scim2_models import URN
 from scim2_models import MutabilityException
 from scim2_models import PatchOperation
+from scim2_models.resources.resource import Resource
 
 from scim2_server.operators import patch_resource
 
@@ -200,3 +202,24 @@ class TestPatch:
                 },
             ],
         }
+
+    def test_patch_replace_multivalued_primitive_attribute(self):
+        """Replace a multi-valued primitive attribute."""
+
+        class MyResource(Resource):
+            __schema__ = URN("urn:example:schemas:MyResource")
+
+            tags: list[str] | None = None
+
+        resource = MyResource(id="123")
+
+        patch_resource(
+            resource,
+            PatchOperation(
+                op=PatchOperation.Op.replace_,
+                path="tags",
+                value=["tag1", "tag2"],
+            ),
+        )
+
+        assert resource.tags == ["tag1", "tag2"]
