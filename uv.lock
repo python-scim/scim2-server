@@ -668,7 +668,7 @@ wheels = [
 
 [[package]]
 name = "scim2-server"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "scim2-filter-parser" },
