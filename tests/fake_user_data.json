@@ -1,5 +1,9 @@
 [
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "joseph96@williams-brown.com",
     "displayName": "Mx. Larry Hunt",
     "name": {
@@ -47,6 +51,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "katherine21@example.org",
     "displayName": "Mrs. Allen Martin",
     "name": {
@@ -89,6 +97,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "sjordan@example.org",
     "displayName": "Mr. Justin Morgan",
     "name": {
@@ -151,6 +163,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "jacobrodriguez@malone-rowland.com",
     "displayName": "Mr. Kathleen Hall",
     "name": {
@@ -197,6 +213,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "daniel01@johnson.org",
     "displayName": "Mx. Jeffery Stevens DDS",
     "name": {
@@ -228,6 +248,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "nguyenbobby@richardson.com",
     "displayName": "Mr. Robyn Sanders",
     "name": {
@@ -300,6 +324,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "walshkatherine@example.org",
     "displayName": "Mrs. Mitchell Thomas",
     "name": {
@@ -354,6 +382,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "bradleyriley@williams-anderson.org",
     "displayName": "Mr. Megan Rios",
     "name": {
@@ -396,6 +428,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "michelle98@moss-guzman.com",
     "displayName": "Mx. Jose Brooks",
     "name": {
@@ -452,6 +488,10 @@
     }
   },
   {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+    ],
     "userName": "mary45@green.org",
     "displayName": "Mrs. Chad Jennings",
     "name": {

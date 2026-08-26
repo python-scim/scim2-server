@@ -36,6 +36,7 @@ class TestSCIMProviderBasic:
 
     def test_unique_constraints(self, wsgi):
         payload = {
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "userName": "bjensen@example.com",
         }
         r = wsgi.post("/v2/Users", json=payload)
@@ -44,12 +45,19 @@ class TestSCIMProviderBasic:
         r = wsgi.post("/v2/Users", json=payload)
         assert r.status_code == 409
 
-        r = wsgi.post("/v2/Users", json={"userName": "BJENSEN@EXAMPLE.COM"})
+        r = wsgi.post(
+            "/v2/Users",
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                "userName": "BJENSEN@EXAMPLE.COM",
+            },
+        )
         assert r.status_code == 409
 
         r = wsgi.post(
             "/v2/Users",
             json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
                 "userName": "bjensen2@example.com",
             },
         )
@@ -58,6 +66,7 @@ class TestSCIMProviderBasic:
         r = wsgi.put(
             f"/v2/Users/{user_id}",
             json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
                 "userName": "bjensen@example.com",
             },
         )
@@ -111,6 +120,7 @@ class TestSCIMProviderBasic:
         u1_id = wsgi.post(
             "/v2/Users",
             json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
                 "userName": "ajensen@example.com",
                 "name": {
                     "formatted": "A",
@@ -136,6 +146,7 @@ class TestSCIMProviderBasic:
         u2_id = wsgi.post(
             "/v2/Users",
             json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
                 "userName": "bjensen@example.com",
                 "name": {
                     "givenName": "B",
@@ -150,7 +161,10 @@ class TestSCIMProviderBasic:
 
         group_id = wsgi.post(
             "/v2/Groups",
-            json={"displayName": "group display name"},
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+                "displayName": "group display name",
+            },
         ).json()["id"]
 
         assert_sorted("userName", [u1_id, u2_id])
