@@ -44,9 +44,14 @@ def main():
         type=argparse.FileType("w"),
         help="Dump resources to a JSON file on exit",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable the interactive debugger, the reloader and the logging of the WSGI environment",
+    )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
 
     from werkzeug.serving import run_simple
 
@@ -77,7 +82,8 @@ def main():
         for bearer_token in args.bearer_token:
             app.register_bearer_token(bearer_token)
 
-    app = log_environ(app)
+    if args.debug:
+        app = log_environ(app)
     if args.reverse_proxy:
         app = ProxyFix(app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 
@@ -85,8 +91,8 @@ def main():
         args.hostname,
         args.port,
         app,
-        use_debugger=True,
-        use_reloader=True,
+        use_debugger=args.debug,
+        use_reloader=args.debug,
     )
 
     if args.dump_resources:
