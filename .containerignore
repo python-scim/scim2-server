@@ -1,0 +1,7 @@
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!scim2_server
+**/__pycache__
