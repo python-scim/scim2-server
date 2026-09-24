@@ -19,7 +19,7 @@ The only optional feature currently missing is support for Bulk operations ([RFC
 ## Usage
 
 ```shell
-$ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--bearer-token BEARER_TOKEN] [--hostname HOSTNAME] [--port PORT] [--reverse-proxy] [--dump-resources DUMP_RESOURCES]
+$ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--bearer-token BEARER_TOKEN] [--hostname HOSTNAME] [--port PORT] [--reverse-proxy] [--dump-resources DUMP_RESOURCES] [--debug]
 ```
 
 - `-h`/`--help`: Show help message
@@ -30,6 +30,18 @@ $ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--bearer-
 - `--hostname`: The hostname to listen on. Defaults to `127.0.0.1`.
 - `--port`: The port to listen on. Defaults to `8080`.
 - `--dump-resources`: Dump a JSON document containing all resources when the provider exits normally.
+- `--debug`: Enable the interactive Werkzeug debugger, the reloader and the logging of the WSGI environment of each request. The debugger allows arbitrary code execution and the environment contains the bearer tokens, so never use this option on a server reachable by others.
+
+### Container
+
+A container image is published on the GitHub container registry for each release.
+The server listens on `0.0.0.0:8080` inside the container, and the command line arguments are passed to `scim2-server`:
+
+```shell
+$ docker run --publish 8080:8080 ghcr.io/python-scim/scim2-server --bearer-token secret
+```
+
+To build the image yourself, use `docker build --file Containerfile .` or `podman build .`.
 
 ## Notes
 

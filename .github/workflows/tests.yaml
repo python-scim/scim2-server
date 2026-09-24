@@ -53,3 +53,23 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+
+  container:
+    name: container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build --file Containerfile --tag scim2-server:ci .
+      - name: Start container
+        run: docker run --detach --name scim2-server --publish 8080:8080 scim2-server:ci --bearer-token secret
+      - name: Check the server answers
+        run: |
+          curl --fail --silent --retry 30 --retry-delay 1 --retry-all-errors --output /dev/null http://127.0.0.1:8080/v2/ServiceProviderConfig
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/v2/Users)" = 401
+          curl --fail --silent --output /dev/null --header "Authorization: Bearer secret" http://127.0.0.1:8080/v2/Users
+      - name: Stop container
+        run: timeout 5 docker stop scim2-server
+      - name: Show logs
+        if: always()
+        run: docker logs scim2-server
