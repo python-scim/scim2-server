@@ -22,6 +22,7 @@ from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import Schema
 from scim2_models import SCIMException
+from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
@@ -122,24 +123,27 @@ class SCIMApplication:
 
         self.url_map = Map(rules)
 
+    @property
+    def provider(self) -> ScimProvider:
+        """The description of the service, which the backend stores the resources of."""
+        return self.backend.provider
+
+    def get_resource_type_by_endpoint(self, endpoint: str) -> ResourceType | None:
+        """Return the resource type an endpoint serves."""
+        return next(
+            (
+                resource_type
+                for resource_type in self.provider.resource_types
+                if resource_type.endpoint.lstrip("/").casefold()
+                == endpoint.lstrip("/").casefold()
+            ),
+            None,
+        )
+
     @staticmethod
-    def adjust_location(
-        request: Request, resource: Resource, cp=False
-    ) -> Resource | None:
-        """Adjust the "meta.location" attribute of a resource to match the hostname the client used to access this server. If a static URL is used,.
-
-        :param request: The werkzeug request object
-        :param resource: The resource to modify
-        :param cp: Whether to return a modified copy of the resource or
-            to modify the resource in-place.
-        """
-        location = urljoin(request.url + "/", resource.meta.location)
-        if cp:
-            obj = resource.model_copy(deep=True)
-            obj.meta.location = location
-            return obj
-
-        resource.meta.location = location
+    def adjust_location(request: Request, resource: Resource):
+        """Make the "meta.location" of a resource absolute, from the URL the client requested."""
+        resource.meta.location = urljoin(request.url + "/", resource.meta.location)
 
     def apply_patch_operation(self, resource: Resource, patch_operation):
         """Apply a PATCH operation to a resource."""
@@ -166,8 +170,7 @@ class SCIMApplication:
     def call_single_resource(
         self, request: Request, resource_endpoint: str, resource_id: str, **kwargs
     ) -> Response:
-        find_endpoint = "/" + resource_endpoint
-        resource_type = self.backend.get_resource_type_by_endpoint(find_endpoint)
+        resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
             raise NotFound
 
@@ -303,7 +306,7 @@ class SCIMApplication:
 
     def query_resource(self, request: Request, resource: ResourceType | None):
         models = (
-            list(self.backend.get_models())
+            self.backend.get_models()
             if resource is None
             else [self.backend.get_model(resource.id)]
         )
@@ -336,9 +339,7 @@ class SCIMApplication:
     def call_resource(
         self, request: Request, resource_endpoint: str, **kwargs
     ) -> Response:
-        resource_type = self.backend.get_resource_type_by_endpoint(
-            "/" + resource_endpoint
-        )
+        resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
             raise NotFound
 
@@ -377,9 +378,7 @@ class SCIMApplication:
     def call_resource_search(
         self, request: Request, resource_endpoint: str, **kwargs
     ) -> Response:
-        resource_type = self.backend.get_resource_type_by_endpoint(
-            "/" + resource_endpoint
-        )
+        resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
             raise NotFound
         return self.make_response(
@@ -395,12 +394,6 @@ class SCIMApplication:
         the endpoint does not provide this feature.
         """
         raise WerkzeugNotImplemented
-
-    def register_schema(self, schema: Schema):
-        self.backend.register_schema(schema)
-
-    def register_resource_type(self, resource_type: ResourceType):
-        self.backend.register_resource_type(resource_type)
 
     def register_bearer_token(self, token: str):
         """Register a static bearer token for authentication.
@@ -483,54 +476,58 @@ class SCIMApplication:
         spc.meta.location = request.url
         return self.make_response(spc.model_dump())
 
+    @staticmethod
+    def locate(resource: ResourceType | Schema, location: str):
+        """Return a copy of a discovery resource carrying its meta."""
+        meta = Meta(resource_type=type(resource).__name__, location=location)
+        return resource.model_copy(update={"meta": meta})
+
     def call_resource_type(self, request: Request, resource_type: str, **kwargs):
         """Return a single resource type."""
         self.forbid_filter(request)
-        if res := self.backend.get_resource_type(resource_type):
-            cp = res.model_copy(deep=True)
-            cp.meta.location = request.url
-            return self.make_response(cp.model_dump())
+        for res in self.provider.resource_types:
+            if res.id == resource_type:
+                return self.make_response(
+                    self.locate(res, request.base_url).model_dump()
+                )
         raise NotFound
 
     def call_schema(self, request: Request, schema_id: str):
         """Return a single schema."""
         self.forbid_filter(request)
-        if res := self.backend.get_schema(schema_id):
-            cp = res.model_copy(deep=True)
-            cp.meta.location = request.url
-            return self.make_response(cp.model_dump())
+        for res in self.provider.schemas:
+            if res.id == schema_id:
+                return self.make_response(
+                    self.locate(res, request.base_url).model_dump()
+                )
         raise NotFound
 
     def call_resource_types(self, request: Request, **kwargs):
         """Return a ListResponse of all known resource types."""
         self.forbid_filter(request)
-        results = self.backend.get_resource_types()
+        results = self.provider.resource_types
         resp = ListResponse[ResourceType](
             total_results=len(results),
             items_per_page=len(results),
             start_index=1,
-            resources=[self.adjust_location(request, s, True) for s in results],
+            resources=[self.locate(s, f"{request.base_url}/{s.id}") for s in results],
         ).model_dump()
         return self.make_response(resp)
 
     def call_schemas(self, request: Request, **kwargs):
         """Return a ListResponse of all known schemas."""
         self.forbid_filter(request)
-        results = self.backend.get_schemas()
+        results = self.provider.schemas
         resp = ListResponse[Schema](
             total_results=len(results),
             items_per_page=len(results),
             start_index=1,
-            resources=[self.adjust_location(request, s, True) for s in results],
+            resources=[self.locate(s, f"{request.base_url}/{s.id}") for s in results],
         ).model_dump()
         return self.make_response(resp)
 
     def wsgi_app(self, request: Request, environ):
         try:
-            if environ.get("PATH_INFO", "").endswith(".scim"):
-                # RFC 7644, Section 3.8
-                # Just strip .scim suffix, the provider always returns application/scim+json
-                environ["PATH_INFO"], _, _ = environ["PATH_INFO"].rpartition(".scim")
             urls = self.url_map.bind_to_environ(environ)
             endpoint, args = urls.match()
 
@@ -562,6 +559,10 @@ class SCIMApplication:
 
     def __call__(self, environ, start_response):
         """Return the actual WSGI server implementation."""
+        if environ.get("PATH_INFO", "").endswith(".scim"):
+            # RFC 7644, Section 3.8
+            # Just strip .scim suffix, the provider always returns application/scim+json
+            environ["PATH_INFO"], _, _ = environ["PATH_INFO"].rpartition(".scim")
         request = Request(environ)
         response = self.wsgi_app(request, environ)
         if "Location" not in response.headers:

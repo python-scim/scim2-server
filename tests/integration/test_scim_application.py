@@ -143,6 +143,29 @@ class TestSCIMApplication:
         assert j["status"] == "404"
         assert "not found" in j["detail"]
 
+    def test_discovery_resources_carry_their_meta(self, wsgi):
+        """Each schema and resource type is published with its type and its location."""
+        base_url = "https://scim.example.com/v2"
+        for endpoint, resource_type in (
+            ("Schemas", "Schema"),
+            ("ResourceTypes", "ResourceType"),
+        ):
+            for resource in wsgi.get(f"/v2/{endpoint}").json()["Resources"]:
+                location = f"{base_url}/{endpoint}/{resource['id']}"
+                assert resource["meta"] == {
+                    "resourceType": resource_type,
+                    "location": location,
+                }
+                single = wsgi.get(f"/v2/{endpoint}/{resource['id']}").json()
+                assert single["meta"] == resource["meta"]
+
+    def test_discovery_location_leaves_out_the_scim_suffix(self, wsgi):
+        """RFC 7644 §3.8: the .scim suffix only selects the format, it is not part of the location."""
+        r = wsgi.get("/v2/ResourceTypes/User.scim")
+        assert r.json()["meta"]["location"] == (
+            "https://scim.example.com/v2/ResourceTypes/User"
+        )
+
     def test_me(self, wsgi):
         r = wsgi.get("/v2/Me")
         assert r.status_code == 501

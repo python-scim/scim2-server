@@ -8,7 +8,7 @@ from scim2_models import Extension
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
-from scim2_models import SchemaExtension
+from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
@@ -73,9 +73,7 @@ class TestBackend:
             __schema__ = URN("urn:example:2.0:Badge")
             code: Annotated[str | None, Uniqueness.server] = None
 
-        backend = InMemoryBackend()
-        backend.register_schema(Badge.to_schema())
-        backend.register_resource_type(ResourceType.from_resource(Badge))
+        backend = InMemoryBackend(ScimProvider(models=[Badge]))
         backend.create_resource("Badge", Badge())
         backend.create_resource("Badge", Badge())
         backend.create_resource("Badge", Badge(code="x"))
@@ -114,34 +112,7 @@ class TestBackend:
         assert total_results == 3
         assert len(resources) == 1
 
-    def test_meta_resource_type_name(self, app):
-        backend = app.backend
-        backend.resource_types["User"] = backend.resource_types["User"].model_copy(
-            update={"name": "User RT Name"}
-        )
-        resource = backend.get_model("User")(user_name="bjensen")
-        created = backend.create_resource("User", resource)
-        assert created.meta.resource_type == "User RT Name"
-
-    def test_register_resource_type_unknown_schema(self):
-        backend = InMemoryBackend()
-        rt = ResourceType(schema="urn:unknown:Foo")
-        with pytest.raises(RuntimeError):
-            backend.register_resource_type(rt)
-
-        schema = Schema(id="urn:unknown:Foo")
-        backend.register_schema(schema)
-        rt = ResourceType(
-            schema="urn:unknown:Foo",
-            schema_extensions=[
-                SchemaExtension(schema="urn:unknown:Bar", required=True)
-            ],
-        )
-        with pytest.raises(RuntimeError):
-            backend.register_resource_type(rt)
-
-    def test_update_unknown_resource(self):
-        backend = InMemoryBackend()
+    def test_update_unknown_resource(self, backend):
         resource = User(id="123")
         assert backend.update_resource("User", resource) is None
 
@@ -162,17 +133,14 @@ def test_query_resources_binds_a_filter_that_names_no_resource_type(
 
 def test_a_resource_type_named_apart_from_its_id(static_data):
     """The resources of a resource type whose name differs from its id stay reachable."""
-    backend = InMemoryBackend()
-    for schema in static_data[0].values():
-        backend.register_schema(schema)
-    backend.register_resource_type(
-        ResourceType(
-            id="Usr",
-            name="User",
-            endpoint="/Users",
-            schema="urn:ietf:params:scim:schemas:core:2.0:User",
-        )
+    resource_type = ResourceType(
+        id="Usr",
+        name="User",
+        endpoint="/Users",
+        schema="urn:ietf:params:scim:schemas:core:2.0:User",
     )
+    provider = ScimProvider.from_discovery(static_data[0].values(), [resource_type])
+    backend = InMemoryBackend(provider)
     User = backend.get_model("Usr")
     created = backend.create_resource("Usr", User(user_name="bjensen"))
     assert created.meta.resource_type == "User"

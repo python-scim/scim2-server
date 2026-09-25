@@ -5,6 +5,7 @@ import pprint
 
 from scim2_models import ResourceType
 from scim2_models import Schema
+from scim2_models import ScimProvider
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scim2_server.backend import InMemoryBackend
@@ -55,28 +56,22 @@ def main():
 
     from werkzeug.serving import run_simple
 
-    backend = InMemoryBackend()
-    app = SCIMApplication(backend)
-
     if args.schema is None:
-        for schema in load_default_schemas().values():
-            app.register_schema(schema)
+        schemas = load_default_schemas().values()
     else:
-        def_sch = json.load(args.schema)
-        for sc in def_sch:
-            schema = Schema.model_validate(sc)
-            app.register_schema(schema)
-        args.schema.close()
+        with args.schema:
+            schemas = [Schema.model_validate(sc) for sc in json.load(args.schema)]
 
     if args.resource_type is None:
-        for resource_type in load_default_resource_types().values():
-            app.register_resource_type(resource_type)
+        resource_types = load_default_resource_types().values()
     else:
-        def_rt = json.load(args.resource_type)
-        for rt in def_rt:
-            resource_type = ResourceType.model_validate(rt)
-            app.register_resource_type(resource_type)
-        args.resource_type.close()
+        with args.resource_type:
+            resource_types = [
+                ResourceType.model_validate(rt) for rt in json.load(args.resource_type)
+            ]
+
+    backend = InMemoryBackend(ScimProvider.from_discovery(schemas, resource_types))
+    app = SCIMApplication(backend)
 
     if args.bearer_token is not None:
         for bearer_token in args.bearer_token:

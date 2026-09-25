@@ -6,6 +6,7 @@ from inspect import isclass
 from threading import Lock
 from typing import Any
 from typing import Union
+from typing import cast
 
 from scim2_models import BaseModel
 from scim2_models import CaseExact
@@ -13,8 +14,8 @@ from scim2_models import Extension
 from scim2_models import Meta
 from scim2_models import Resource
 from scim2_models import ResourceType
-from scim2_models import Schema
 from scim2_models import ScimFilter
+from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
@@ -22,13 +23,16 @@ from werkzeug.http import generate_etag
 
 
 class Backend:
-    """The base class for a SCIM provider backend."""
+    """The base class for a SCIM provider backend.
 
-    def __init__(self):
-        self.schemas: dict[str, Schema] = {}
-        self.resource_types: dict[str, ResourceType] = {}
-        self.resource_types_by_endpoint: dict[str, ResourceType] = {}
-        self.models_dict: dict[str, BaseModel] = {}
+    A backend stores the resources of the service its provider describes.
+    """
+
+    def __init__(self, provider: ScimProvider):
+        self.provider = provider
+        self.resource_types: dict[str, ResourceType] = {
+            resource_type.id: resource_type for resource_type in provider.resource_types
+        }
 
     def __enter__(self):
         """Allow the backend to be used as a context manager.
@@ -41,63 +45,16 @@ class Backend:
         """Exit the transaction."""
         pass
 
-    def register_schema(self, schema: Schema):
-        """Register a Schema for use with the backend."""
-        self.schemas[schema.id] = schema
+    def get_model(self, resource_type_id: str) -> type[Resource]:
+        """Return the model of a resource type, its extensions included."""
+        model = self.provider.model_for(self.resource_types[resource_type_id])
+        return cast(type[Resource], model)
 
-    def get_schemas(self):
-        """Return all schemas registered with the backend."""
-        return self.schemas.values()
-
-    def get_schema(self, schema_id: str) -> Schema | None:
-        """Get a schema by its id."""
-        return self.schemas.get(schema_id)
-
-    def register_resource_type(self, resource_type: ResourceType):
-        """Register a ResourceType for use with the backend.
-
-        The schemas used for the resource and its extensions must have
-        been registered with the Backend beforehand.
-        """
-        if resource_type.schema_ not in self.schemas:
-            raise RuntimeError(f"Unknown schema: {resource_type.schema_}")
-        for resource_extension in resource_type.schema_extensions or []:
-            if resource_extension.schema_ not in self.schemas:
-                raise RuntimeError(f"Unknown schema: {resource_extension.schema_}")
-
-        self.resource_types[resource_type.id] = resource_type
-        self.resource_types_by_endpoint[resource_type.endpoint.lower()] = resource_type
-
-        extensions = [
-            Extension.from_schema(self.get_schema(se.schema_))
-            for se in resource_type.schema_extensions or []
+    def get_models(self) -> list[type[Resource]]:
+        """Return the models of every resource type."""
+        return [
+            self.get_model(resource_type_id) for resource_type_id in self.resource_types
         ]
-        base_schema = self.get_schema(resource_type.schema_)
-        self.models_dict[resource_type.id] = Resource.from_schema(base_schema)
-        if extensions:
-            self.models_dict[resource_type.id] = self.models_dict[resource_type.id][
-                Union[tuple(extensions)]  # noqa: UP007
-            ]
-
-    def get_resource_types(self):
-        """Return all resource types registered with the backend."""
-        return self.resource_types.values()
-
-    def get_resource_type(self, resource_type_id: str) -> ResourceType | None:
-        """Return the resource type by its id."""
-        return self.resource_types.get(resource_type_id)
-
-    def get_resource_type_by_endpoint(self, endpoint: str) -> ResourceType | None:
-        """Return the resource type by its endpoint."""
-        return self.resource_types_by_endpoint.get(endpoint.lower())
-
-    def get_model(self, resource_type_id: str) -> BaseModel | None:
-        """Return the Pydantic Python model for a given resource type."""
-        return self.models_dict.get(resource_type_id)
-
-    def get_models(self):
-        """Return all Pydantic Python models for all known resource types."""
-        return self.models_dict.values()
 
     def query_resources(
         self,
@@ -217,8 +174,8 @@ class InMemoryBackend(Backend):
                 descriptors.extend(cls.collect_unique_attrs(root_type, field_name))
         return descriptors
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, provider: ScimProvider):
+        super().__init__(provider)
         self.resources: list[Resource] = []
         self.lock: Lock = Lock()
 
@@ -246,9 +203,9 @@ class InMemoryBackend(Backend):
         scim_filter = search_request.filter
         if scim_filter is not None and not scim_filter.models:
             models = (
-                list(self.models_dict.values())
+                self.get_models()
                 if resource_type_id is None
-                else [self.models_dict[resource_type_id]]
+                else [self.get_model(resource_type_id)]
             )
             scim_filter = ScimFilter[Union[tuple(models)]](str(scim_filter))  # noqa: UP007
 
@@ -355,7 +312,7 @@ class InMemoryBackend(Backend):
     ) -> Resource | None:
         found_res_idx = self._get_resource_idx(resource_type_id, resource.id)
         if found_res_idx is not None:
-            updated_resource = self.models_dict[resource_type_id].model_validate(
+            updated_resource = self.get_model(resource_type_id).model_validate(
                 resource.model_dump()
             )
             self._touch_resource(

@@ -15,6 +15,7 @@ from scim2_models import NoTargetException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
+from scim2_models import ScimProvider
 
 
 def load_json_resource(json_name: str) -> list:
@@ -42,6 +43,13 @@ def load_default_schemas() -> dict[str, Schema]:
 def load_default_resource_types() -> dict[str, ResourceType]:
     """Load the default resource types from RFC 7643."""
     return load_scim_resource("default-resource-types.json", ResourceType)
+
+
+def load_default_provider() -> ScimProvider:
+    """Describe a service serving the default schemas and resource types."""
+    return ScimProvider.from_discovery(
+        load_default_schemas().values(), load_default_resource_types().values()
+    )
 
 
 def get_by_alias(

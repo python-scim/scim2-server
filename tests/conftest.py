@@ -6,13 +6,19 @@ import pytest
 
 from scim2_server.backend import InMemoryBackend
 from scim2_server.provider import SCIMApplication
+from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 
 
+@pytest.fixture(scope="session")
+def scim_provider():
+    return load_default_provider()
+
+
 @pytest.fixture
-def backend():
-    return InMemoryBackend()
+def backend(scim_provider):
+    return InMemoryBackend(scim_provider)
 
 
 @pytest.fixture(scope="session")
@@ -32,13 +38,8 @@ def fake_user_data():
 
 
 @pytest.fixture
-def app(backend, static_data):
-    app = SCIMApplication(backend)
-    for schema in static_data[0].values():
-        app.register_schema(schema)
-    for resource_type in static_data[1].values():
-        app.register_resource_type(resource_type)
-    return app
+def app(backend):
+    return SCIMApplication(backend)
 
 
 @pytest.fixture
