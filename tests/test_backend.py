@@ -158,3 +158,28 @@ def test_query_resources_binds_a_filter_that_names_no_resource_type(
     total_results, resources = backend.query_resources(request, resource_type_id)
     assert total_results == 1
     assert resources[0].user_name == "bob"
+
+
+def test_a_resource_type_named_apart_from_its_id(static_data):
+    """The resources of a resource type whose name differs from its id stay reachable."""
+    backend = InMemoryBackend()
+    for schema in static_data[0].values():
+        backend.register_schema(schema)
+    backend.register_resource_type(
+        ResourceType(
+            id="Usr",
+            name="User",
+            endpoint="/Users",
+            schema="urn:ietf:params:scim:schemas:core:2.0:User",
+        )
+    )
+    User = backend.get_model("Usr")
+    created = backend.create_resource("Usr", User(user_name="bjensen"))
+    assert created.meta.resource_type == "User"
+
+    assert backend.get_resource("Usr", created.id).user_name == "bjensen"
+    assert backend.query_resources(SearchRequest(), "Usr")[0] == 1
+    with pytest.raises(UniquenessException):
+        backend.create_resource("Usr", User(user_name="bjensen"))
+    assert backend.delete_resource("Usr", created.id)
+    assert backend.get_resource("Usr", created.id) is None

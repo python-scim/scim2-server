@@ -258,7 +258,7 @@ class InMemoryBackend(Backend):
         found_resources = [
             r
             for r in self.resources
-            if (resource_type_id is None or r.meta.resource_type == resource_type_id)
+            if (resource_type_id is None or self._is_of_type(r, resource_type_id))
             and (scim_filter is None or scim_filter.match(r))
         ]
 
@@ -290,12 +290,20 @@ class InMemoryBackend(Backend):
             found_resources = found_resources[: search_request.count]
         return total_results, found_resources
 
+    def _is_of_type(self, resource: Resource, resource_type_id: str) -> bool:
+        """Tell whether a resource belongs to a resource type.
+
+        RFC 7643 §3.1 has meta.resourceType carry the name of the resource type,
+        which may differ from its id.
+        """
+        return resource.meta.resource_type == self.resource_types[resource_type_id].name
+
     def _get_resource_idx(self, resource_type_id: str, object_id: str) -> int | None:
         return next(
             (
                 idx
                 for idx, r in enumerate(self.resources)
-                if r.meta.resource_type == resource_type_id and r.id == object_id
+                if self._is_of_type(r, resource_type_id) and r.id == object_id
             ),
             None,
         )
@@ -312,7 +320,7 @@ class InMemoryBackend(Backend):
             self.resources = [
                 r
                 for r in self.resources
-                if not (r.meta.resource_type == resource_type_id and r.id == object_id)
+                if not (self._is_of_type(r, resource_type_id) and r.id == object_id)
             ]
             return True
         return False
@@ -348,7 +356,7 @@ class InMemoryBackend(Backend):
                 continue
             for existing_resource in self.resources:
                 if (
-                    existing_resource.meta.resource_type == resource_type_id
+                    self._is_of_type(existing_resource, resource_type_id)
                     and existing_resource.id != resource.id
                     and unique_attribute.get_attribute(existing_resource) == value
                 ):
