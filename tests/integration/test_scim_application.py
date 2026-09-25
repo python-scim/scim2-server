@@ -409,9 +409,11 @@ class TestSCIMApplication:
             "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User" not in r.json()
         )
 
-    def test_resource_put_keeps_an_omitted_password(self, app, wsgi, first_fake_user):
+    def test_resource_put_keeps_an_omitted_password(
+        self, app, user_type, wsgi, first_fake_user
+    ):
         """A client never gets the password back, so omitting it does not clear it."""
-        stored = app.backend.get_resource("User", first_fake_user)
+        stored = app.backend.get_resource(user_type, first_fake_user)
         assert stored.password is not None
 
         r = wsgi.put(
@@ -419,11 +421,11 @@ class TestSCIMApplication:
             json={"userName": "joseph96@williams-brown.com"},
         )
         assert r.status_code == 200
-        replaced = app.backend.get_resource("User", first_fake_user)
+        replaced = app.backend.get_resource(user_type, first_fake_user)
         assert replaced.password == stored.password
 
     def test_resource_put_clears_a_password_set_to_null(
-        self, app, wsgi, first_fake_user
+        self, app, user_type, wsgi, first_fake_user
     ):
         """An explicit null is how RFC 7644 §3.5.1 lets a client clear a value."""
         r = wsgi.put(
@@ -431,7 +433,7 @@ class TestSCIMApplication:
             json={"userName": "joseph96@williams-brown.com", "password": None},
         )
         assert r.status_code == 200
-        assert app.backend.get_resource("User", first_fake_user).password is None
+        assert app.backend.get_resource(user_type, first_fake_user).password is None
 
     def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
         """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""

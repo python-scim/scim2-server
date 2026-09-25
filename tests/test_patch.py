@@ -9,7 +9,7 @@ from scim2_server.operators import patch_resource
 
 class TestPatch:
     def test_patch_operation_add_simple(self, app):
-        user = app.backend.get_model("User")(id="123")
+        user = app.provider.model_for("User")(id="123")
         patch_resource(
             user,
             PatchOperation(
@@ -64,7 +64,7 @@ class TestPatch:
         }
 
     def test_patch_operation_add_complex(self, app):
-        user = app.backend.get_model("User")(id="123")
+        user = app.provider.model_for("User")(id="123")
         patch_resource(
             user,
             PatchOperation(
@@ -144,7 +144,7 @@ class TestPatch:
         }
 
     def test_patch_operation_add_multi_valued(self, app):
-        user = app.backend.get_model("User")(id="123")
+        user = app.provider.model_for("User")(id="123")
         patch_resource(
             user,
             PatchOperation(

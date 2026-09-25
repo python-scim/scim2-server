@@ -16,9 +16,14 @@ def scim_provider():
     return load_default_provider()
 
 
+@pytest.fixture(scope="session")
+def user_type(scim_provider):
+    return next(rt for rt in scim_provider.resource_types if rt.id == "User")
+
+
 @pytest.fixture
-def backend(scim_provider):
-    return InMemoryBackend(scim_provider)
+def backend():
+    return InMemoryBackend()
 
 
 @pytest.fixture(scope="session")
@@ -38,8 +43,8 @@ def fake_user_data():
 
 
 @pytest.fixture
-def app(backend):
-    return SCIMApplication(backend)
+def app(backend, scim_provider):
+    return SCIMApplication(backend, scim_provider)
 
 
 @pytest.fixture

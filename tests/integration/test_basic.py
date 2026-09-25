@@ -96,7 +96,7 @@ class TestSCIMApplicationBasic:
         assert r.json()["userName"] == "bjensen2@example.com"
 
     def test_sort(self, app, wsgi):
-        TypedListResponse = ListResponse[Union[tuple(app.backend.get_models())]]  # noqa: UP007
+        TypedListResponse = ListResponse[Union[tuple(app.get_models())]]  # noqa: UP007
 
         def assert_sorted(sort_by: str, sorted: list[str], endpoint: str = "/v2/Users"):
             for order_by, inverted in (

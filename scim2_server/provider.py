@@ -3,6 +3,7 @@ import json
 import logging
 import traceback
 from typing import Union
+from typing import cast
 from urllib.parse import urljoin
 
 from pydantic import ValidationError
@@ -56,9 +57,10 @@ SEARCH_REQUEST_PARAMETERS = (
 class SCIMApplication:
     """A WSGI application implementing a SCIM provider (server)."""
 
-    def __init__(self, backend: Backend):
+    def __init__(self, backend: Backend, provider: ScimProvider):
         self.bearer_tokens = set()
         self.backend = backend
+        self.provider = provider
         self.page_size = 50
         self.log = logging.getLogger("SCIMApplication")
 
@@ -123,10 +125,13 @@ class SCIMApplication:
 
         self.url_map = Map(rules)
 
-    @property
-    def provider(self) -> ScimProvider:
-        """The description of the service, which the backend stores the resources of."""
-        return self.backend.provider
+    def get_model(self, resource_type: ResourceType) -> type[Resource]:
+        """Return the model of a resource type, its extensions included."""
+        return cast(type[Resource], self.provider.model_for(resource_type))
+
+    def get_models(self) -> list[type[Resource]]:
+        """Return the models of every resource type."""
+        return [self.get_model(rt) for rt in self.provider.resource_types]
 
     def get_resource_type_by_endpoint(self, endpoint: str) -> ResourceType | None:
         """Return the resource type an endpoint serves."""
@@ -176,10 +181,10 @@ class SCIMApplication:
 
         match request.method:
             case "GET":
-                if resource := self.backend.get_resource(resource_type.id, resource_id):
+                if resource := self.backend.get_resource(resource_type, resource_id):
                     if self.continue_etag(request, resource):
                         response_parameters = self.get_response_parameters(
-                            request, self.backend.get_model(resource_type.id)
+                            request, self.get_model(resource_type)
                         )
                         self.adjust_location(request, resource)
                         return self.make_response(
@@ -192,25 +197,25 @@ class SCIMApplication:
                         return self.make_response(None, status=304)
                 raise NotFound
             case "DELETE":
-                if self.backend.delete_resource(resource_type.id, resource_id):
+                if self.backend.delete_resource(resource_type, resource_id):
                     return self.make_response(None, 204)
                 else:
                     raise NotFound
             case "PUT":
                 response_parameters = self.get_response_parameters(
-                    request, self.backend.get_model(resource_type.id)
+                    request, self.get_model(resource_type)
                 )
-                resource = self.backend.get_resource(resource_type.id, resource_id)
+                resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
                 if not self.continue_etag(request, resource):
                     raise PreconditionFailed
 
-                replacement = self.backend.get_model(resource_type.id).model_validate(
+                replacement = self.get_model(resource_type).model_validate(
                     request.json, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
                 )
                 replacement.replace(resource)
-                updated = self.backend.update_resource(resource_type.id, replacement)
+                updated = self.backend.update_resource(resource_type, replacement)
                 self.adjust_location(request, updated)
                 return self.make_response(
                     updated.model_dump(
@@ -229,19 +234,19 @@ class SCIMApplication:
                         # MS Entra sometimes passes a "name" attribute
                         del operation["name"]
 
-                ResourceModel = self.backend.get_model(resource_type.id)
+                ResourceModel = self.get_model(resource_type)
                 patch_operation = PatchOp[ResourceModel].model_validate(payload)
                 response_parameters = self.get_response_parameters(
                     request, ResourceModel
                 )
-                resource = self.backend.get_resource(resource_type.id, resource_id)
+                resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
                 if not self.continue_etag(request, resource):
                     raise PreconditionFailed
 
                 self.apply_patch_operation(resource, patch_operation)
-                updated = self.backend.update_resource(resource_type.id, resource)
+                updated = self.backend.update_resource(resource_type, resource)
 
                 if (
                     response_parameters.attributes
@@ -305,18 +310,11 @@ class SCIMApplication:
         return search_request
 
     def query_resource(self, request: Request, resource: ResourceType | None):
-        models = (
-            self.backend.get_models()
-            if resource is None
-            else [self.backend.get_model(resource.id)]
-        )
+        models = self.get_models() if resource is None else [self.get_model(resource)]
         search_request = self.build_search_request(request, models)
 
-        kwargs = {}
-        if resource is not None:
-            kwargs["resource_type_id"] = resource.id
         total_results, results = self.backend.query_resources(
-            search_request=search_request, **kwargs
+            search_request=search_request, resource_type=resource
         )
         for r in results:
             self.adjust_location(request, r)
@@ -329,7 +327,7 @@ class SCIMApplication:
             for s in results
         ]
 
-        return ListResponse[Union[tuple(self.backend.get_models())]](  # noqa: UP007
+        return ListResponse[Union[tuple(self.get_models())]](  # noqa: UP007
             total_results=total_results,
             items_per_page=len(resources),
             start_index=search_request.start_index,
@@ -352,13 +350,10 @@ class SCIMApplication:
                 )
             case _:  # "POST"
                 payload = request.json
-                resource = self.backend.get_model(resource_type.id).model_validate(
+                resource = self.get_model(resource_type).model_validate(
                     payload, scim_ctx=Context.RESOURCE_CREATION_REQUEST
                 )
-                created_resource = self.backend.create_resource(
-                    resource_type.id,
-                    resource,
-                )
+                created_resource = self.backend.create_resource(resource_type, resource)
                 self.adjust_location(request, created_resource)
                 return self.make_response(
                     created_resource.model_dump(

@@ -4,8 +4,8 @@ from scim2_models import Context
 
 
 class TestProvider:
-    def test_user_creation(self, app):
-        user_model = app.backend.get_model("User").model_validate(
+    def test_user_creation(self, app, user_type):
+        user_model = app.provider.model_for("User").model_validate(
             {
                 "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
                 "userName": "bjensen@example.com",
@@ -21,7 +21,7 @@ class TestProvider:
             },
             scim_ctx=Context.RESOURCE_CREATION_REQUEST,
         )
-        ret = app.backend.create_resource("User", user_model)
+        ret = app.backend.create_resource(user_type, user_model)
         assert ret.id is not None
 
     def test_generic_exception_handling(self, app):

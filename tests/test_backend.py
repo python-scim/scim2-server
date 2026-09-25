@@ -61,7 +61,7 @@ class TestBackend:
 
     def test_unique_attributes_of_the_default_user(self, app):
         """The only uniqueness constraint checked on a User is userName, the id being assigned by the backend."""
-        User = app.backend.get_model("User")
+        User = app.provider.model_for("User")
         assert InMemoryBackend.collect_unique_attrs(User) == [
             InMemoryBackend.UniquenessDescriptor(None, "user_name", False)
         ]
@@ -73,62 +73,72 @@ class TestBackend:
             __schema__ = URN("urn:example:2.0:Badge")
             code: Annotated[str | None, Uniqueness.server] = None
 
-        backend = InMemoryBackend(ScimProvider(models=[Badge]))
-        backend.create_resource("Badge", Badge())
-        backend.create_resource("Badge", Badge())
-        backend.create_resource("Badge", Badge(code="x"))
+        backend = InMemoryBackend()
+        badge_type = ResourceType.from_resource(Badge)
+        backend.create_resource(badge_type, Badge())
+        backend.create_resource(badge_type, Badge())
+        backend.create_resource(badge_type, Badge(code="x"))
         with pytest.raises(UniquenessException):
-            backend.create_resource("Badge", Badge(code="x"))
+            backend.create_resource(badge_type, Badge(code="x"))
 
-    def test_unique_values_are_compared_with_unicode_case_folding(self, app):
+    def test_unique_values_are_compared_with_unicode_case_folding(self, app, user_type):
         """Unicode case folding makes "Straße" and "STRASSE" the same value."""
         backend = app.backend
-        User = backend.get_model("User")
-        backend.create_resource("User", User(user_name="Straße"))
+        User = app.provider.model_for("User")
+        backend.create_resource(user_type, User(user_name="Straße"))
         with pytest.raises(UniquenessException):
-            backend.create_resource("User", User(user_name="STRASSE"))
+            backend.create_resource(user_type, User(user_name="STRASSE"))
 
-    def test_query_resources_without_count_returns_every_resource(self, app):
+    def test_query_resources_without_count_returns_every_resource(self, app, user_type):
         """A search request carrying no count is not paginated by the backend."""
         backend = app.backend
         for user_name in ("a", "b", "c"):
             backend.create_resource(
-                "User", backend.get_model("User")(user_name=user_name)
+                user_type, app.provider.model_for("User")(user_name=user_name)
             )
-        total_results, resources = backend.query_resources(SearchRequest(), "User")
+        total_results, resources = backend.query_resources(SearchRequest(), user_type)
         assert total_results == 3
         assert len(resources) == 3
 
-    def test_query_resources_total_results_counts_beyond_the_page(self, app):
+    def test_query_resources_total_results_counts_beyond_the_page(self, app, user_type):
         """The total results count every matching resource, not only the returned page."""
         backend = app.backend
         for user_name in ("a", "b", "c"):
             backend.create_resource(
-                "User", backend.get_model("User")(user_name=user_name)
+                user_type, app.provider.model_for("User")(user_name=user_name)
             )
         total_results, resources = backend.query_resources(
-            SearchRequest(start_index=2, count=1), "User"
+            SearchRequest(start_index=2, count=1), user_type
         )
         assert total_results == 3
         assert len(resources) == 1
 
-    def test_update_unknown_resource(self, backend):
+    def test_update_unknown_resource(self, backend, user_type):
         resource = User(id="123")
-        assert backend.update_resource("User", resource) is None
+        assert backend.update_resource(user_type, resource) is None
 
 
-@pytest.mark.parametrize("resource_type_id", ["User", None])
+@pytest.mark.parametrize("queried", ["User", None])
 def test_query_resources_binds_a_filter_that_names_no_resource_type(
-    app, resource_type_id
+    app, user_type, queried
 ):
-    """A filter left unbound is resolved against the resource types being queried."""
+    """A filter left unbound is resolved against the models of the stored resources."""
     backend = app.backend
     for user_name in ("alice", "bob"):
-        backend.create_resource("User", backend.get_model("User")(user_name=user_name))
+        backend.create_resource(
+            user_type, app.provider.model_for("User")(user_name=user_name)
+        )
     request = SearchRequest(filter='userName eq "bob"')
-    total_results, resources = backend.query_resources(request, resource_type_id)
+    resource_type = user_type if queried else None
+    total_results, resources = backend.query_resources(request, resource_type)
     assert total_results == 1
     assert resources[0].user_name == "bob"
+
+
+def test_query_resources_with_an_unbound_filter_and_no_resource(backend):
+    """With no stored resource, an unbound filter has nothing to be resolved against nor to match."""
+    request = SearchRequest(filter='userName eq "bob"')
+    assert backend.query_resources(request) == (0, [])
 
 
 def test_a_resource_type_named_apart_from_its_id(static_data):
@@ -140,14 +150,14 @@ def test_a_resource_type_named_apart_from_its_id(static_data):
         schema="urn:ietf:params:scim:schemas:core:2.0:User",
     )
     provider = ScimProvider.from_discovery(static_data[0].values(), [resource_type])
-    backend = InMemoryBackend(provider)
-    User = backend.get_model("Usr")
-    created = backend.create_resource("Usr", User(user_name="bjensen"))
+    backend = InMemoryBackend()
+    User = provider.model_for(resource_type)
+    created = backend.create_resource(resource_type, User(user_name="bjensen"))
     assert created.meta.resource_type == "User"
 
-    assert backend.get_resource("Usr", created.id).user_name == "bjensen"
-    assert backend.query_resources(SearchRequest(), "Usr")[0] == 1
+    assert backend.get_resource(resource_type, created.id).user_name == "bjensen"
+    assert backend.query_resources(SearchRequest(), resource_type)[0] == 1
     with pytest.raises(UniquenessException):
-        backend.create_resource("Usr", User(user_name="bjensen"))
-    assert backend.delete_resource("Usr", created.id)
-    assert backend.get_resource("Usr", created.id) is None
+        backend.create_resource(resource_type, User(user_name="bjensen"))
+    assert backend.delete_resource(resource_type, created.id)
+    assert backend.get_resource(resource_type, created.id) is None

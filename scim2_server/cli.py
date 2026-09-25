@@ -70,8 +70,8 @@ def main():
                 ResourceType.model_validate(rt) for rt in json.load(args.resource_type)
             ]
 
-    backend = InMemoryBackend(ScimProvider.from_discovery(schemas, resource_types))
-    app = SCIMApplication(backend)
+    backend = InMemoryBackend()
+    app = SCIMApplication(backend, ScimProvider.from_discovery(schemas, resource_types))
 
     if args.bearer_token is not None:
         for bearer_token in args.bearer_token:

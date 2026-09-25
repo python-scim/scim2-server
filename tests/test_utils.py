@@ -50,7 +50,7 @@ class TestUtils:
         )
 
     def test_match_filter(self, app):
-        user = app.backend.get_model("User").model_validate(
+        user = app.provider.model_for("User").model_validate(
             {
                 "schemas": [
                     "urn:ietf:params:scim:schemas:core:2.0:User",
@@ -176,7 +176,7 @@ class TestUtils:
         )
 
     def test_attribute_resolving(self, app):
-        user = app.backend.get_model("User").model_validate(
+        user = app.provider.model_for("User").model_validate(
             {
                 "schemas": [
                     "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",

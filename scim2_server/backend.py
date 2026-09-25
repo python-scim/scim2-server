@@ -6,7 +6,6 @@ from inspect import isclass
 from threading import Lock
 from typing import Any
 from typing import Union
-from typing import cast
 
 from scim2_models import BaseModel
 from scim2_models import CaseExact
@@ -15,7 +14,6 @@ from scim2_models import Meta
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ScimFilter
-from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
@@ -25,14 +23,9 @@ from werkzeug.http import generate_etag
 class Backend:
     """The base class for a SCIM provider backend.
 
-    A backend stores the resources of the service its provider describes.
+    A backend only stores resources: what the service serves is described by the
+    :class:`~scim2_models.ScimProvider` of the application.
     """
-
-    def __init__(self, provider: ScimProvider):
-        self.provider = provider
-        self.resource_types: dict[str, ResourceType] = {
-            resource_type.id: resource_type for resource_type in provider.resource_types
-        }
 
     def __enter__(self):
         """Allow the backend to be used as a context manager.
@@ -45,43 +38,33 @@ class Backend:
         """Exit the transaction."""
         pass
 
-    def get_model(self, resource_type_id: str) -> type[Resource]:
-        """Return the model of a resource type, its extensions included."""
-        model = self.provider.model_for(self.resource_types[resource_type_id])
-        return cast(type[Resource], model)
-
-    def get_models(self) -> list[type[Resource]]:
-        """Return the models of every resource type."""
-        return [
-            self.get_model(resource_type_id) for resource_type_id in self.resource_types
-        ]
-
     def query_resources(
         self,
         search_request: SearchRequest,
-        resource_type_id: str | None = None,
+        resource_type: ResourceType | None = None,
     ) -> tuple[int, list[Resource]]:
         """Query the backend for a set of resources.
 
         :param search_request: SearchRequest instance describing the
             query.
-        :param resource_type_id: ID of the resource type to query. If
-            None, all resource types are queried.
+        :param resource_type: The resource type to query. If None, all
+            resource types are queried.
         :return: A tuple of "total results" and a List of found
             Resources. The List must contain a copy of resources.
             Mutating elements in the List must not modify the data
             stored in the backend.
         :raises TooManyException: If the backend only supports querying
-            for one resource type at a time, setting resource_type_id to
+            for one resource type at a time, setting resource_type to
             None the backend may raise TooManyException.
         """
         raise NotImplementedError
 
-    def get_resource(self, resource_type_id: str, object_id: str) -> Resource | None:
+    def get_resource(
+        self, resource_type: ResourceType, object_id: str
+    ) -> Resource | None:
         """Query the backend for a resources by its ID.
 
-        :param resource_type_id: ID of the resource type to get the
-            object from.
+        :param resource_type: The resource type to get the object from.
         :param object_id: ID of the object to get.
         :return: The resource object if it exists, None otherwise. The
             resource must be a copy, modifying it must not change the
@@ -89,22 +72,22 @@ class Backend:
         """
         raise NotImplementedError
 
-    def delete_resource(self, resource_type_id: str, object_id: str) -> bool:
+    def delete_resource(self, resource_type: ResourceType, object_id: str) -> bool:
         """Delete a resource.
 
-        :param resource_type_id: ID of the resource type to delete the
-            object from.
+        :param resource_type: The resource type to delete the object
+            from.
         :param object_id: ID of the object to delete.
         :return: True if the resource was deleted, False otherwise.
         """
         raise NotImplementedError
 
     def create_resource(
-        self, resource_type_id: str, resource: Resource
+        self, resource_type: ResourceType, resource: Resource
     ) -> Resource | None:
         """Create a resource.
 
-        :param resource_type_id: ID of the resource type to create.
+        :param resource_type: The resource type to create.
         :param resource: Resource to create.
         :return: The created resource. Creation should set system-
             defined attributes (ID, Metadata). May be the same object
@@ -113,11 +96,11 @@ class Backend:
         raise NotImplementedError
 
     def update_resource(
-        self, resource_type_id: str, resource: Resource
+        self, resource_type: ResourceType, resource: Resource
     ) -> Resource | None:
         """Update a resource. The resource is identified by its ID.
 
-        :param resource_type_id: ID of the resource type to update.
+        :param resource_type: The resource type to update.
         :param resource: Resource to update.
         :return: The updated resource. Updating should update the
             "meta.lastModified" data. May be the same object that is
@@ -174,8 +157,8 @@ class InMemoryBackend(Backend):
                 descriptors.extend(cls.collect_unique_attrs(root_type, field_name))
         return descriptors
 
-    def __init__(self, provider: ScimProvider):
-        super().__init__(provider)
+    def __init__(self):
+        super().__init__()
         self.resources: list[Resource] = []
         self.lock: Lock = Lock()
 
@@ -196,24 +179,23 @@ class InMemoryBackend(Backend):
     def query_resources(
         self,
         search_request: SearchRequest,
-        resource_type_id: str | None = None,
+        resource_type: ResourceType | None = None,
     ) -> tuple[int, list[Resource]]:
         start_index = (search_request.start_index or 1) - 1
 
-        scim_filter = search_request.filter
-        if scim_filter is not None and not scim_filter.models:
-            models = (
-                self.get_models()
-                if resource_type_id is None
-                else [self.get_model(resource_type_id)]
-            )
-            scim_filter = ScimFilter[Union[tuple(models)]](str(scim_filter))  # noqa: UP007
-
-        found_resources = [
+        candidates = [
             r
             for r in self.resources
-            if (resource_type_id is None or self._is_of_type(r, resource_type_id))
-            and (scim_filter is None or scim_filter.match(r))
+            if resource_type is None or self._is_of_type(r, resource_type)
+        ]
+
+        scim_filter = search_request.filter
+        if scim_filter is not None and not scim_filter.models and candidates:
+            models = tuple(dict.fromkeys(type(r) for r in candidates))
+            scim_filter = ScimFilter[Union[models]](str(scim_filter))  # noqa: UP007
+
+        found_resources = [
+            r for r in candidates if scim_filter is None or scim_filter.match(r)
         ]
 
         found_resources = search_request.sort(found_resources)
@@ -224,62 +206,63 @@ class InMemoryBackend(Backend):
             found_resources = found_resources[: search_request.count]
         return total_results, found_resources
 
-    def _is_of_type(self, resource: Resource, resource_type_id: str) -> bool:
+    def _is_of_type(self, resource: Resource, resource_type: ResourceType) -> bool:
         """Tell whether a resource belongs to a resource type.
 
         RFC 7643 §3.1 has meta.resourceType carry the name of the resource type,
         which may differ from its id.
         """
-        return resource.meta.resource_type == self.resource_types[resource_type_id].name
+        return resource.meta.resource_type == resource_type.name
 
-    def _get_resource_idx(self, resource_type_id: str, object_id: str) -> int | None:
+    def _get_resource_idx(
+        self, resource_type: ResourceType, object_id: str
+    ) -> int | None:
         return next(
             (
                 idx
                 for idx, r in enumerate(self.resources)
-                if self._is_of_type(r, resource_type_id) and r.id == object_id
+                if self._is_of_type(r, resource_type) and r.id == object_id
             ),
             None,
         )
 
-    def get_resource(self, resource_type_id: str, object_id: str) -> Resource | None:
-        resource_dict_idx = self._get_resource_idx(resource_type_id, object_id)
+    def get_resource(
+        self, resource_type: ResourceType, object_id: str
+    ) -> Resource | None:
+        resource_dict_idx = self._get_resource_idx(resource_type, object_id)
         if resource_dict_idx is not None:
             return self.resources[resource_dict_idx].model_copy(deep=True)
         return None
 
-    def delete_resource(self, resource_type_id: str, object_id: str) -> bool:
-        found = self.get_resource(resource_type_id, object_id)
+    def delete_resource(self, resource_type: ResourceType, object_id: str) -> bool:
+        found = self.get_resource(resource_type, object_id)
         if found:
             self.resources = [
                 r
                 for r in self.resources
-                if not (self._is_of_type(r, resource_type_id) and r.id == object_id)
+                if not (self._is_of_type(r, resource_type) and r.id == object_id)
             ]
             return True
         return False
 
     def create_resource(
-        self, resource_type_id: str, resource: Resource
+        self, resource_type: ResourceType, resource: Resource
     ) -> Resource | None:
         resource = resource.model_copy(deep=True)
         resource.id = uuid.uuid4().hex
         utcnow = datetime.datetime.now(datetime.timezone.utc)
         resource.meta = Meta(
-            resource_type=self.resource_types[resource_type_id].name,
+            resource_type=resource_type.name,
             created=utcnow,
             last_modified=utcnow,
-            location="/v2"
-            + self.resource_types[resource_type_id].endpoint
-            + "/"
-            + resource.id,
+            location="/v2" + resource_type.endpoint + "/" + resource.id,
         )
         self._touch_resource(resource, utcnow)
-        self._check_uniqueness(resource_type_id, resource)
+        self._check_uniqueness(resource_type, resource)
         self.resources.append(resource)
         return resource
 
-    def _check_uniqueness(self, resource_type_id: str, resource: Resource):
+    def _check_uniqueness(self, resource_type: ResourceType, resource: Resource):
         """Refuse a resource sharing a unique value with another one of its type.
 
         A missing value never clashes, as a SQL NULL does not.
@@ -290,7 +273,7 @@ class InMemoryBackend(Backend):
                 continue
             for existing_resource in self.resources:
                 if (
-                    self._is_of_type(existing_resource, resource_type_id)
+                    self._is_of_type(existing_resource, resource_type)
                     and existing_resource.id != resource.id
                     and unique_attribute.get_attribute(existing_resource) == value
                 ):
@@ -308,18 +291,16 @@ class InMemoryBackend(Backend):
         resource.meta.version = f'W/"{etag}"'
 
     def update_resource(
-        self, resource_type_id: str, resource: Resource
+        self, resource_type: ResourceType, resource: Resource
     ) -> Resource | None:
-        found_res_idx = self._get_resource_idx(resource_type_id, resource.id)
+        found_res_idx = self._get_resource_idx(resource_type, resource.id)
         if found_res_idx is not None:
-            updated_resource = self.get_model(resource_type_id).model_validate(
-                resource.model_dump()
-            )
+            updated_resource = type(resource).model_validate(resource.model_dump())
             self._touch_resource(
                 updated_resource, datetime.datetime.now(datetime.timezone.utc)
             )
 
-            self._check_uniqueness(resource_type_id, updated_resource)
+            self._check_uniqueness(resource_type, updated_resource)
             self.resources[found_res_idx] = updated_resource
             return updated_resource
         return None
