@@ -632,6 +632,63 @@ class TestSCIMProvider:
         assert r.status_code == 400
         assert r.json()["scimType"] == "invalidValue"
 
+    @pytest.mark.parametrize(
+        "filter_", ['emails[type eq "work"]', 'emails.type eq "work"']
+    )
+    def test_search_filters_on_the_entries_of_a_multivalued_attribute(
+        self, wsgi, filter_
+    ):
+        """A value selection and a bare sub-attribute comparison select entries alike."""
+        for user_name, email_type in (("alice", "work"), ("bob", "home")):
+            wsgi.post(
+                "/v2/Users",
+                json={
+                    "userName": user_name,
+                    "emails": [
+                        {"value": f"{user_name}@example.com", "type": email_type}
+                    ],
+                },
+            )
+        r = wsgi.get("/v2/Users", params={"filter": filter_})
+        assert r.status_code == 200
+        assert [u["userName"] for u in r.json()["Resources"]] == ["alice"]
+
+    def test_search_on_the_root_skips_types_lacking_the_attribute(self, wsgi):
+        """RFC 7644 §3.4.2.1 evaluates an attribute a resource type lacks as having no value."""
+        wsgi.post("/v2/Users", json={"userName": "bob"})
+        wsgi.post("/v2/Groups", json={"displayName": "admins"})
+        r = wsgi.get("/v2/", params={"filter": 'userName eq "bob"'})
+        assert r.status_code == 200
+        assert [u["userName"] for u in r.json()["Resources"]] == ["bob"]
+
+    def test_search_folds_the_case_of_a_case_insensitive_string(self, wsgi):
+        """Unicode case folding makes "STRASSE" match "Straße"."""
+        wsgi.post("/v2/Users", json={"userName": "alice", "title": "Straße"})
+        r = wsgi.get("/v2/Users", params={"filter": 'title eq "STRASSE"'})
+        assert [u["userName"] for u in r.json()["Resources"]] == ["alice"]
+
+    def test_search_filters_on_the_schemas_a_resource_carries(self, wsgi):
+        """RFC 7644 §3.4.2.2 lets a client query resources by schema extension."""
+        enterprise = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+        wsgi.post(
+            "/v2/Users",
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User", enterprise],
+                "userName": "alice",
+                enterprise: {"employeeNumber": "1"},
+            },
+        )
+        wsgi.post("/v2/Users", json={"userName": "bob"})
+        r = wsgi.get("/v2/Users", params={"filter": f'schemas eq "{enterprise}"'})
+        assert [u["userName"] for u in r.json()["Resources"]] == ["alice"]
+
+    def test_search_compares_an_unassigned_attribute_to_null(self, wsgi):
+        """An attribute holding no value equals null."""
+        wsgi.post("/v2/Users", json={"userName": "alice", "displayName": "Al"})
+        wsgi.post("/v2/Users", json={"userName": "bob"})
+        r = wsgi.get("/v2/Users", params={"filter": "displayName eq null"})
+        assert [u["userName"] for u in r.json()["Resources"]] == ["bob"]
+
     def test_resource_search(self, wsgi, first_fake_user):
         r = wsgi.get("/v2/Users", params={"attributes": "userName"})
         assert r.status_code == 200

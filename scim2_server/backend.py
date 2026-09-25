@@ -6,8 +6,6 @@ import uuid
 from threading import Lock
 from typing import Union
 
-from scim2_filter_parser import lexer
-from scim2_filter_parser.parser import SCIMParser
 from scim2_models import Attribute
 from scim2_models import BaseModel
 from scim2_models import CaseExact
@@ -16,12 +14,12 @@ from scim2_models import Meta
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
+from scim2_models import ScimFilter
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 from werkzeug.http import generate_etag
 
-from scim2_server.filter import evaluate_filter
 from scim2_server.operators import ResolveSortOperator
 from scim2_server.utils import get_by_alias
 
@@ -262,16 +260,20 @@ class InMemoryBackend(Backend):
     ) -> tuple[int, list[Resource]]:
         start_index = (search_request.start_index or 1) - 1
 
-        tree = None
-        if search_request.filter is not None:
-            token_stream = lexer.SCIMLexer().tokenize(search_request.filter)
-            tree = SCIMParser().parse(token_stream)
+        scim_filter = search_request.filter
+        if scim_filter is not None and not scim_filter.models:
+            models = (
+                list(self.models_dict.values())
+                if resource_type_id is None
+                else [self.models_dict[resource_type_id]]
+            )
+            scim_filter = ScimFilter[Union[tuple(models)]](str(scim_filter))  # noqa: UP007
 
         found_resources = [
             r
             for r in self.resources
             if (resource_type_id is None or r.meta.resource_type == resource_type_id)
-            and (tree is None or evaluate_filter(r, tree))
+            and (scim_filter is None or scim_filter.match(r))
         ]
 
         if search_request.sort_by is not None:

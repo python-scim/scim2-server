@@ -110,7 +110,9 @@ class TestBackend:
 
     def test_meta_resource_type_name(self, provider):
         backend = provider.backend
-        backend.resource_types["User"].name = "User RT Name"
+        backend.resource_types["User"] = backend.resource_types["User"].model_copy(
+            update={"name": "User RT Name"}
+        )
         resource = backend.get_model("User")(user_name="bjensen")
         created = backend.create_resource("User", resource)
         assert created.meta.resource_type == "User RT Name"
@@ -136,3 +138,17 @@ class TestBackend:
         backend = InMemoryBackend()
         resource = User(id="123")
         assert backend.update_resource("User", resource) is None
+
+
+@pytest.mark.parametrize("resource_type_id", ["User", None])
+def test_query_resources_binds_a_filter_that_names_no_resource_type(
+    provider, resource_type_id
+):
+    """A filter left unbound is resolved against the resource types being queried."""
+    backend = provider.backend
+    for user_name in ("alice", "bob"):
+        backend.create_resource("User", backend.get_model("User")(user_name=user_name))
+    request = SearchRequest(filter='userName eq "bob"')
+    total_results, resources = backend.query_resources(request, resource_type_id)
+    assert total_results == 1
+    assert resources[0].user_name == "bob"
