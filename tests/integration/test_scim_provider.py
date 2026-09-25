@@ -544,6 +544,16 @@ class TestSCIMProvider:
         assert r.json()["totalResults"] == 3
         assert len(r.json()["Resources"]) == 1
 
+    def test_search_items_per_page_counts_the_returned_page(self, wsgi, fake_user_data):
+        """The items per page are the resources returned, which may be fewer than count."""
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users", params={"startIndex": 3, "count": 2})
+        assert r.status_code == 200
+        assert r.json()["totalResults"] == 3
+        assert r.json()["itemsPerPage"] == 1
+        assert len(r.json()["Resources"]) == 1
+
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""
         r = wsgi.post(

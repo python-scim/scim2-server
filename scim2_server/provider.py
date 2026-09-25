@@ -317,7 +317,7 @@ class SCIMProvider:
 
         return ListResponse[Union[tuple(self.backend.get_models())]](  # noqa: UP007
             total_results=total_results,
-            items_per_page=search_request.count,
+            items_per_page=len(resources),
             start_index=search_request.start_index,
             resources=resources,
         )
