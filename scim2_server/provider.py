@@ -543,7 +543,7 @@ class SCIMProvider:
             return self.make_error(e.to_error())
         except ValidationError as e:
             self.log.exception(e)
-            return self.make_error(Error(status=400, detail=str(e)))
+            return self.make_error(Error.from_validation_errors(e)[0])
         except Exception as e:
             self.log.exception(e)
             tb = traceback.format_exc()

@@ -188,3 +188,4 @@ class TestSCIMProviderBasic:
         """RFC 7644 §3.4.2.3 requires sortBy in the attribute notation of §3.10."""
         result = wsgi.get("/v2/Users", params={"sortBy": sort_by})
         assert result.status_code == 400
+        assert result.json()["scimType"] == "invalidPath"

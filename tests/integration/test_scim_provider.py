@@ -535,6 +535,15 @@ class TestSCIMProvider:
         r = wsgi.get("/v2/InvalidResourceType")
         assert r.status_code == 404
 
+    def test_validation_error_carries_scim_type(self, wsgi):
+        """A payload refused by validation answers with a SCIM error keyword."""
+        r = wsgi.post(
+            "/v2/Users",
+            json={"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"]},
+        )
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidValue"
+
     def test_resource_search(self, wsgi, first_fake_user):
         r = wsgi.get("/v2/Users", params={"attributes": "userName"})
         assert r.status_code == 200
