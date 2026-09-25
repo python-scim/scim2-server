@@ -3,10 +3,11 @@ import datetime
 import operator
 import pickle
 import uuid
+from inspect import isclass
 from threading import Lock
+from typing import Any
 from typing import Union
 
-from scim2_models import Attribute
 from scim2_models import BaseModel
 from scim2_models import CaseExact
 from scim2_models import Extension
@@ -21,7 +22,6 @@ from scim2_models import UniquenessException
 from werkzeug.http import generate_etag
 
 from scim2_server.operators import ResolveSortOperator
-from scim2_server.utils import get_by_alias
 
 
 class Backend:
@@ -181,56 +181,48 @@ class InMemoryBackend(Backend):
     implementation simple.
     """
 
-    @dataclasses.dataclass
+    @dataclasses.dataclass(frozen=True)
     class UniquenessDescriptor:
         """Used to mimic uniqueness constraints e.g. from a SQL database."""
 
-        schema: str | None
-        attribute_name: str
+        extension: str | None
+        field_name: str
         case_exact: bool
 
-        def get_attribute(self, resource: Resource):
-            if self.schema is not None:
-                schema_field = get_by_alias(type(resource), self.schema)
-                resource = getattr(resource, schema_field)
-
-            attribute_field = get_by_alias(type(resource), self.attribute_name)
-            result = getattr(resource, attribute_field)
-            if not self.case_exact:
-                result = result.lower()
-            return result
+        def get_attribute(self, resource: Resource) -> Any:
+            holder = getattr(resource, self.extension) if self.extension else resource
+            value = getattr(holder, self.field_name, None) if holder else None
+            if isinstance(value, str) and not self.case_exact:
+                return value.casefold()
+            return value
 
     @classmethod
     def collect_unique_attrs(
-        cls, attributes: list[Attribute], schema: str | None
+        cls, model: type[BaseModel], extension: str | None = None
     ) -> list[UniquenessDescriptor]:
-        ret = []
-        for attr in attributes:
-            if attr.uniqueness != Uniqueness.none:
-                ret.append(
-                    cls.UniquenessDescriptor(
-                        schema, attr.name, attr.case_exact == CaseExact.true
-                    )
-                )
-        return ret
+        """Return the uniqueness constraints the annotations of a model declare.
 
-    @classmethod
-    def collect_resource_unique_attrs(
-        cls, resource_type: ResourceType, schemas: dict[str, Schema]
-    ) -> list[list[UniquenessDescriptor]]:
-        ret = cls.collect_unique_attrs(schemas[resource_type.schema_].attributes, None)
-        for extension in resource_type.schema_extensions or []:
-            ret.extend(
-                InMemoryBackend.collect_unique_attrs(
-                    schemas[extension.schema_].attributes, extension.schema_
-                )
+        The ``id`` is left out: the backend issues it, so it cannot clash.
+        """
+        descriptors = [
+            cls.UniquenessDescriptor(
+                extension,
+                field_name,
+                model.get_field_annotation(field_name, CaseExact) == CaseExact.true,
             )
-        return ret
+            for field_name in model.model_fields
+            if field_name != "id"
+            and model.get_field_annotation(field_name, Uniqueness) != Uniqueness.none
+        ]
+        for field_name in model.model_fields:
+            root_type = model.get_field_root_type(field_name)
+            if isclass(root_type) and issubclass(root_type, Extension):
+                descriptors.extend(cls.collect_unique_attrs(root_type, field_name))
+        return descriptors
 
     def __init__(self):
         super().__init__()
         self.resources: list[Resource] = []
-        self.unique_attributes: dict[str, list[list[str]]] = {}
         self.lock: Lock = Lock()
 
     def __enter__(self):
@@ -246,12 +238,6 @@ class InMemoryBackend(Backend):
     def __exit__(self, exc_type, exc_val, exc_tb):
         super().__exit__(exc_type, exc_val, exc_tb)
         self.lock.release()
-
-    def register_resource_type(self, resource_type: ResourceType):
-        super().register_resource_type(resource_type)
-        self.unique_attributes[resource_type.id] = self.collect_resource_unique_attrs(
-            resource_type, self.schemas
-        )
 
     def query_resources(
         self,
@@ -347,17 +333,26 @@ class InMemoryBackend(Backend):
             + resource.id,
         )
         self._touch_resource(resource, utcnow)
-
-        for unique_attribute in self.unique_attributes[resource_type_id]:
-            new_value = unique_attribute.get_attribute(resource)
-            for existing_resource in self.resources:
-                if existing_resource.meta.resource_type == resource_type_id:
-                    existing_value = unique_attribute.get_attribute(existing_resource)
-                    if existing_value == new_value:
-                        raise UniquenessException()
-
+        self._check_uniqueness(resource_type_id, resource)
         self.resources.append(resource)
         return resource
+
+    def _check_uniqueness(self, resource_type_id: str, resource: Resource):
+        """Refuse a resource sharing a unique value with another one of its type.
+
+        A missing value never clashes, as a SQL NULL does not.
+        """
+        for unique_attribute in self.collect_unique_attrs(type(resource)):
+            value = unique_attribute.get_attribute(resource)
+            if value is None:
+                continue
+            for existing_resource in self.resources:
+                if (
+                    existing_resource.meta.resource_type == resource_type_id
+                    and existing_resource.id != resource.id
+                    and unique_attribute.get_attribute(existing_resource) == value
+                ):
+                    raise UniquenessException()
 
     @staticmethod
     def _touch_resource(resource: Resource, last_modified: datetime.datetime):
@@ -382,19 +377,7 @@ class InMemoryBackend(Backend):
                 updated_resource, datetime.datetime.now(datetime.timezone.utc)
             )
 
-            for unique_attribute in self.unique_attributes[resource_type_id]:
-                new_value = unique_attribute.get_attribute(updated_resource)
-                for existing_resource in self.resources:
-                    if (
-                        existing_resource.meta.resource_type == resource_type_id
-                        and existing_resource.id != updated_resource.id
-                    ):
-                        existing_value = unique_attribute.get_attribute(
-                            existing_resource
-                        )
-                        if existing_value == new_value:
-                            raise UniquenessException()
-
+            self._check_uniqueness(resource_type_id, updated_resource)
             self.resources[found_res_idx] = updated_resource
             return updated_resource
         return None

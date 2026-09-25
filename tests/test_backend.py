@@ -1,12 +1,17 @@
+from typing import Annotated
+
 import pytest
+from scim2_models import URN
 from scim2_models import Attribute
 from scim2_models import CaseExact
 from scim2_models import Extension
+from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import SchemaExtension
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
+from scim2_models import UniquenessException
 from scim2_models import User
 
 from scim2_server.backend import InMemoryBackend
@@ -14,22 +19,7 @@ from scim2_server.backend import InMemoryBackend
 
 class TestBackend:
     def test_unique_attributes(self, provider):
-        backend = provider.backend
-        assert "Group" in backend.unique_attributes
-        assert "User" in backend.unique_attributes
-        assert len(backend.unique_attributes["User"]) == 1
-        assert backend.unique_attributes["User"][
-            0
-        ] == InMemoryBackend.UniquenessDescriptor(
-            schema=None, attribute_name="userName", case_exact=False
-        )
-
-        rt = ResourceType(
-            schema="urn:example:2.0:Foo",
-            schema_extensions=[
-                SchemaExtension(schema="urn:example:2.0:Bar", required=True)
-            ],
-        )
+        """The uniqueness constraints are read from the annotations of the model, extensions included."""
         foo_schema = Schema(
             id="urn:example:2.0:Foo",
             name="Foo",
@@ -50,39 +40,55 @@ class TestBackend:
                     name="a",
                     type=Attribute.Type.string,
                     uniqueness=Uniqueness.global_,
-                    case_exact=CaseExact.true,
                 ),
             ],
         )
+        Bar = Extension.from_schema(bar_schema)
+        FooBar = Resource.from_schema(foo_schema)[Bar]
 
-        desc_1 = InMemoryBackend.UniquenessDescriptor(
-            schema=None, attribute_name="a", case_exact=True
-        )
-        desc_2 = InMemoryBackend.UniquenessDescriptor(
-            schema="urn:example:2.0:Bar", attribute_name="a", case_exact=True
-        )
-
-        assert InMemoryBackend.collect_resource_unique_attrs(
-            rt,
-            {
-                "urn:example:2.0:Foo": foo_schema,
-                "urn:example:2.0:Bar": bar_schema,
-            },
-        ) == [desc_1, desc_2]
-
-        ResType = ResourceType.from_schema(foo_schema)[
-            Extension.from_schema(bar_schema)
+        assert InMemoryBackend.collect_unique_attrs(FooBar) == [
+            InMemoryBackend.UniquenessDescriptor(None, "a", True),
+            InMemoryBackend.UniquenessDescriptor("Bar", "a", False),
         ]
-        res = ResType.model_validate(
-            {
-                "a": "ABC",
-                "urn:example:2.0:Bar": {
-                    "a": "DEF",
-                },
-            }
+
+        resource = FooBar.model_validate(
+            {"a": "ABC", "urn:example:2.0:Bar": {"a": "DEF"}}
         )
-        assert desc_1.get_attribute(res) == "ABC"
-        assert desc_2.get_attribute(res) == "DEF"
+        foo, bar = InMemoryBackend.collect_unique_attrs(FooBar)
+        assert foo.get_attribute(resource) == "ABC"
+        assert bar.get_attribute(resource) == "def"
+        assert bar.get_attribute(FooBar(a="ABC")) is None
+
+    def test_unique_attributes_of_the_default_user(self, provider):
+        """The only uniqueness constraint checked on a User is userName, the id being assigned by the backend."""
+        User = provider.backend.get_model("User")
+        assert InMemoryBackend.collect_unique_attrs(User) == [
+            InMemoryBackend.UniquenessDescriptor(None, "user_name", False)
+        ]
+
+    def test_a_missing_unique_value_does_not_clash(self):
+        """Two resources lacking a unique value do not conflict, as SQL NULLs do not."""
+
+        class Badge(Resource):
+            __schema__ = URN("urn:example:2.0:Badge")
+            code: Annotated[str | None, Uniqueness.server] = None
+
+        backend = InMemoryBackend()
+        backend.register_schema(Badge.to_schema())
+        backend.register_resource_type(ResourceType.from_resource(Badge))
+        backend.create_resource("Badge", Badge())
+        backend.create_resource("Badge", Badge())
+        backend.create_resource("Badge", Badge(code="x"))
+        with pytest.raises(UniquenessException):
+            backend.create_resource("Badge", Badge(code="x"))
+
+    def test_unique_values_are_compared_with_unicode_case_folding(self, provider):
+        """Unicode case folding makes "Straße" and "STRASSE" the same value."""
+        backend = provider.backend
+        User = backend.get_model("User")
+        backend.create_resource("User", User(user_name="Straße"))
+        with pytest.raises(UniquenessException):
+            backend.create_resource("User", User(user_name="STRASSE"))
 
     def test_query_resources_without_count_returns_every_resource(self, provider):
         """A search request carrying no count is not paginated by the backend."""
