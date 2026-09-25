@@ -802,6 +802,80 @@ class TestSCIMApplication:
         assert r.json()["totalResults"] == 3
         assert r.json()["itemsPerPage"] == 0
 
+    @pytest.mark.parametrize(
+        "capability,method,url,payload",
+        [
+            ("filter", "GET", '/v2/Users?filter=userName eq "bjensen"', None),
+            (
+                "filter",
+                "POST",
+                "/v2/Users/.search",
+                {"filter": 'userName eq "bjensen"'},
+            ),
+            ("sort", "GET", "/v2/Users?sortBy=userName", None),
+            ("sort", "GET", "/v2/Users?sortOrder=descending", None),
+            ("sort", "POST", "/v2/.search", {"sortBy": "userName"}),
+        ],
+    )
+    def test_search_refuses_an_unsupported_capability(
+        self, wsgi_with, capability, method, url, payload
+    ):
+        """RFC 7644 §3.12: a search using a capability the service does not declare answers 501."""
+        config = load_default_service_provider_config()
+        setattr(config, capability, None)
+        wsgi = wsgi_with(config)
+        if payload is not None:
+            payload["schemas"] = ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        r = wsgi.request(method, url, json=payload)
+        assert r.status_code == 501
+        assert r.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+        assert r.json()["status"] == "501"
+
+    @pytest.mark.parametrize("patch", [None, Patch(supported=False)])
+    def test_patch_refuses_when_unsupported(self, wsgi_with, fake_user_data, patch):
+        """A service declaring no PATCH support answers 501 to a PATCH, before reading its body."""
+        config = load_default_service_provider_config()
+        config.patch = patch
+        wsgi = wsgi_with(config)
+        user_id = wsgi.post("/v2/Users", json=fake_user_data[0]).json()["id"]
+        r = wsgi.patch(f"/v2/Users/{user_id}", json={})
+        assert r.status_code == 501
+
+    def test_patch_path_filters_do_not_require_the_filter_capability(
+        self, wsgi_with, fake_user_data
+    ):
+        """The filter of a PATCH path belongs to PATCH, not to the search filter capability."""
+        config = load_default_service_provider_config()
+        config.filter = Filter(supported=False)
+        wsgi = wsgi_with(config)
+        user_id = wsgi.post("/v2/Users", json=fake_user_data[0]).json()["id"]
+        r = wsgi.patch(
+            f"/v2/Users/{user_id}",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {
+                        "op": "replace",
+                        "path": 'emails[type eq "work"].value',
+                        "value": "new@example.com",
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 204
+
+    def test_bulk_is_not_implemented(self, wsgi):
+        """RFC 7644 §3.7: bulk is optional, and this server answers 501 to it."""
+        r = wsgi.post(
+            "/v2/Bulk",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "Operations": [],
+            },
+        )
+        assert r.status_code == 501
+        assert r.json()["detail"] == "Bulk operations are not supported"
+
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""
         r = wsgi.post(

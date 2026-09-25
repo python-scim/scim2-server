@@ -9,8 +9,10 @@ from urllib.parse import urljoin
 from pydantic import ValidationError
 from scim2_models import Context
 from scim2_models import Error
+from scim2_models import Filter
 from scim2_models import ListResponse
 from scim2_models import Meta
+from scim2_models import Patch
 from scim2_models import PatchOp
 from scim2_models import Resource
 from scim2_models import ResourceType
@@ -20,6 +22,7 @@ from scim2_models import SCIMException
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
+from scim2_models import Sort
 from werkzeug import Request
 from werkzeug import Response
 from werkzeug.exceptions import Forbidden
@@ -218,6 +221,7 @@ class SCIMApplication:
                     )
                 )
             case _:  # "PATCH"
+                self.ensure_supported(self.config.patch, "PATCH")
                 payload = request.json
                 # MS Entra sometimes passes a "id" attribute
                 if "id" in payload:
@@ -292,6 +296,16 @@ class SCIMApplication:
                 for key in SEARCH_REQUEST_PARAMETERS
                 if key in request.args
             }
+
+        # The filters of PATCH paths are part of the PATCH capability: the
+        # filter capability of RFC 7643 §5 refers to the search parameter of
+        # RFC 7644 §3.4.2.2 only.
+        parameters = {key.casefold() for key in payload}
+        if "filter" in parameters:
+            self.ensure_supported(self.config.filter, "Filtering")
+        if parameters & {"sortby", "sortorder"}:
+            self.ensure_supported(self.config.sort, "Sorting")
+
         search_request = SearchRequest[Union[tuple(models)]].model_validate(  # noqa: UP007
             payload, scim_ctx=Context.SEARCH_REQUEST
         )
@@ -375,6 +389,20 @@ class SCIMApplication:
                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
             )
         )
+
+    @staticmethod
+    def ensure_supported(capability: Patch | Filter | Sort | None, operation: str):
+        """Refuse with a 501 an operation the configuration does not declare supported.
+
+        RFC 7644 §3.12 answers 501 when the service provider does not support
+        the request operation.
+        """
+        if capability is None or not capability.supported:
+            raise WerkzeugNotImplemented(f"{operation} is not supported")
+
+    def call_bulk(self, request: Request, **kwargs):
+        """Implement the /Bulk endpoint, which this server does not support."""
+        raise WerkzeugNotImplemented("Bulk operations are not supported")
 
     def call_me(self, request: Request, **kwargs):
         """Implement the /Me endpoint.
