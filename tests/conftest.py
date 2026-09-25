@@ -3,6 +3,7 @@ import json
 
 import httpx2
 import pytest
+from scim2_models import ScimProvider
 
 from scim2_server.backend import InMemoryBackend
 from scim2_server.provider import SCIMApplication
@@ -55,6 +56,27 @@ def wsgi(app):
     yield client
     app.backend.resources = []
     client.__exit__(None, None, None)
+
+
+@pytest.fixture
+def wsgi_with(backend, scim_provider):
+    """Build clients of applications serving the default resources under another configuration."""
+    clients = []
+
+    def build(config):
+        provider = ScimProvider(
+            models=scim_provider.models,
+            resource_types=scim_provider.resource_types,
+            config=config,
+        )
+        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
+        clients.append(client)
+        return client
+
+    yield build
+    for client in clients:
+        client.close()
 
 
 @pytest.fixture

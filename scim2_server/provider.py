@@ -56,7 +56,6 @@ class SCIMApplication:
         self.backend = backend
         self.provider = provider
         self.config = provider.config or load_default_service_provider_config()
-        self.page_size = 50
         self.log = logging.getLogger("SCIMApplication")
 
         # Register the URL mapping. The endpoint refers to the name of the function to be called in this SCIMApplication ("call_" + endpoint).
@@ -297,11 +296,11 @@ class SCIMApplication:
             payload, scim_ctx=Context.SEARCH_REQUEST
         )
         search_request.start_index = search_request.start_index or 1
-        search_request.count = (
-            self.page_size
-            if search_request.count is None
-            else min(search_request.count, self.page_size)
-        )
+        max_results = self.config.filter.max_results if self.config.filter else None
+        if max_results is not None and (
+            search_request.count is None or search_request.count > max_results
+        ):
+            search_request.count = max_results
         return search_request
 
     def query_resource(self, request: Request, resource: ResourceType | None):

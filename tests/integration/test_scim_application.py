@@ -748,11 +748,13 @@ class TestSCIMApplication:
         assert len(r.json()["Resources"]) == 1
 
     @pytest.mark.parametrize("payload", [{}, {"count": 10}])
-    def test_search_post_is_capped_to_page_size(
-        self, app, wsgi, fake_user_data, payload
+    def test_search_post_is_capped_to_max_results(
+        self, wsgi_with, fake_user_data, payload
     ):
-        """A POST search is paginated with the server page size as a GET is."""
-        app.page_size = 2
+        """A page never holds more than the filter.maxResults the service declares."""
+        config = load_default_service_provider_config()
+        config.filter.max_results = 2
+        wsgi = wsgi_with(config)
         for user in fake_user_data[:3]:
             wsgi.post("/v2/Users", json=user)
         r = wsgi.post(
@@ -767,6 +769,38 @@ class TestSCIMApplication:
         assert r.json()["itemsPerPage"] == 2
         assert r.json()["startIndex"] == 1
         assert len(r.json()["Resources"]) == 2
+
+    def test_search_without_max_results_is_not_paginated(
+        self, wsgi_with, fake_user_data
+    ):
+        """A service declaring no filter.maxResults returns every result when no count is given."""
+        config = load_default_service_provider_config()
+        config.filter = Filter(supported=False)
+        wsgi = wsgi_with(config)
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users")
+        assert r.json()["itemsPerPage"] == 3
+
+    def test_search_without_filter_capabilities_is_not_paginated(
+        self, wsgi_with, fake_user_data
+    ):
+        """A service declaring no filter capabilities returns every result when no count is given."""
+        config = load_default_service_provider_config()
+        config.filter = None
+        wsgi = wsgi_with(config)
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users")
+        assert r.json()["itemsPerPage"] == 3
+
+    def test_search_count_zero_returns_no_resource(self, wsgi, fake_user_data):
+        """RFC 7644 §3.4.2.4: a count of 0 only asks for the total results."""
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users", params={"count": 0})
+        assert r.json()["totalResults"] == 3
+        assert r.json()["itemsPerPage"] == 0
 
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""
