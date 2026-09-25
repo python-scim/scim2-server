@@ -9,7 +9,7 @@
        {
          "schema":
            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-         "required": true
+         "required": false
        }
      ],
      "meta": {

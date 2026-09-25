@@ -124,7 +124,12 @@ class TestSCIMProvider:
         j = r.json()
         assert j["schemas"] == ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"]
         assert j["schema"] == "urn:ietf:params:scim:schemas:core:2.0:User"
-        assert len(j["schemaExtensions"]) == 1
+        assert j["schemaExtensions"] == [
+            {
+                "schema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+                "required": False,
+            }
+        ]
         assert j["meta"]["location"] == "https://scim.example.com/v2/ResourceTypes/User"
 
         # RFC7644, Section 4
