@@ -324,10 +324,15 @@ class TestSCIMProvider:
         )
         assert r.status_code == 200
         j = r.json()
+        # RFC 7644 §3.5.1 lets the omitted readWrite attributes be cleared.
+        assert "displayName" not in j
+        assert (
+            "organization"
+            not in j["urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"]
+        )
         compare_dicts(
             {
                 "id": first_fake_user,
-                "displayName": "Mx. Larry Hunt",
                 "active": False,
                 "userName": "foo@example.com",
                 "name": {
@@ -336,10 +341,8 @@ class TestSCIMProvider:
                 "phoneNumbers": [
                     {"value": "001-767-633-4744", "type": "home", "primary": True}
                 ],
-                "addresses": [],
                 "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
                     "employeeNumber": "512",
-                    "organization": "Blake PLC",
                 },
             },
             j,
@@ -353,6 +356,7 @@ class TestSCIMProvider:
         r = wsgi.put(
             f"/v2/Users/{first_fake_user}",
             json={
+                "userName": "joseph96@williams-brown.com",
                 "name": None,
                 "phoneNumbers": [],
             },
@@ -361,6 +365,80 @@ class TestSCIMProvider:
         j = r.json()
         assert not j.get("name")
         assert not j.get("phoneNumbers")
+
+    def test_resource_put_requires_the_required_attributes(self, wsgi, first_fake_user):
+        """RFC 7644 §3.5.1: a required attribute MUST be specified in a PUT."""
+        r = wsgi.put(f"/v2/Users/{first_fake_user}", json={"displayName": "Foo"})
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidValue"
+
+    def test_resource_put_clears_an_omitted_extension(self, wsgi, first_fake_user):
+        """An extension left out of the replacement is cleared like any readWrite attribute."""
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                "userName": "joseph96@williams-brown.com",
+            },
+        )
+        assert r.status_code == 200
+        assert (
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User" not in r.json()
+        )
+
+    def test_resource_put_keeps_an_omitted_password(
+        self, provider, wsgi, first_fake_user
+    ):
+        """A client never gets the password back, so omitting it does not clear it."""
+        stored = provider.backend.get_resource("User", first_fake_user)
+        assert stored.password is not None
+
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={"userName": "joseph96@williams-brown.com"},
+        )
+        assert r.status_code == 200
+        replaced = provider.backend.get_resource("User", first_fake_user)
+        assert replaced.password == stored.password
+
+    def test_resource_put_clears_a_password_set_to_null(
+        self, provider, wsgi, first_fake_user
+    ):
+        """An explicit null is how RFC 7644 §3.5.1 lets a client clear a value."""
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={"userName": "joseph96@williams-brown.com", "password": None},
+        )
+        assert r.status_code == 200
+        assert provider.backend.get_resource("User", first_fake_user).password is None
+
+    def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
+        """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""
+        group = {
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+            "displayName": "admins",
+            "members": [{"value": "u1", "type": "User"}],
+        }
+        group_id = wsgi.post("/v2/Groups", json=group).json()["id"]
+
+        group["members"][0]["type"] = "Group"
+        r = wsgi.put(f"/v2/Groups/{group_id}", json=group)
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "mutability"
+
+    def test_resource_put_ignores_read_only_attributes(self, wsgi, first_fake_user):
+        """RFC 7644 §3.5.1: readOnly values provided SHALL be ignored."""
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "userName": "joseph96@williams-brown.com",
+                "id": "another-id",
+                "meta": {"resourceType": "Group"},
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["id"] == first_fake_user
+        assert r.json()["meta"]["resourceType"] == "User"
 
     def test_resource_delete(self, wsgi, first_fake_user):
         r = wsgi.delete(f"/v2/Users/{first_fake_user}")

@@ -40,7 +40,6 @@ from werkzeug.routing.exceptions import RequestRedirect
 
 from scim2_server.backend import Backend
 from scim2_server.operators import patch_resource
-from scim2_server.utils import merge_resources
 
 SEARCH_REQUEST_PARAMETERS = (
     "attributes",
@@ -204,11 +203,11 @@ class SCIMProvider:
                 if not self.continue_etag(request, resource):
                     raise PreconditionFailed
 
-                updated_attributes = self.backend.get_model(
-                    resource_type.id
-                ).model_validate(request.json)
-                merge_resources(resource, updated_attributes)
-                updated = self.backend.update_resource(resource_type.id, resource)
+                replacement = self.backend.get_model(resource_type.id).model_validate(
+                    request.json, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
+                )
+                replacement.replace(resource)
+                updated = self.backend.update_resource(resource_type.id, replacement)
                 self.adjust_location(request, updated)
                 return self.make_response(
                     updated.model_dump(

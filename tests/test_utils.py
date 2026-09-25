@@ -1,18 +1,13 @@
-from typing import Annotated
-
 import pytest
 from scim2_filter_parser.lexer import SCIMLexer
 from scim2_filter_parser.parser import SCIMParser
-from scim2_models import URN
 from scim2_models import Context
 from scim2_models import EnterpriseUser
 from scim2_models import InvalidFilterException
 from scim2_models import Meta
-from scim2_models import Mutability
 from scim2_models import MutabilityException
 from scim2_models import Name
 from scim2_models import NoTargetException
-from scim2_models import Resource
 from scim2_models import ResponseParameters
 from scim2_models import SensitiveException
 from scim2_models import User
@@ -20,7 +15,6 @@ from scim2_models import User
 from scim2_server.filter import evaluate_filter
 from scim2_server.operators import ResolveOperator
 from scim2_server.utils import get_or_create
-from scim2_server.utils import merge_resources
 
 
 class TestUtils:
@@ -362,36 +356,7 @@ class TestUtils:
             },
         }
 
-    def test_merge_resources_immutable(self):
-        class Foo(Resource):
-            __schema__ = URN("urn:example:2.0:Foo")
-            immutable_string: Annotated[str | None, Mutability.immutable] = None
-
-        stored = Foo()
-        merge_resources(stored, Foo(immutable_string="ABC"))
-        assert stored.immutable_string == "ABC"
-        merge_resources(stored, Foo(immutable_string="ABC"))
-        with pytest.raises(MutabilityException):
-            merge_resources(stored, Foo(immutable_string="D"))
-
     def test_get_or_create_mutability(self):
         u = User()
         with pytest.raises(MutabilityException):
             get_or_create(u, "groups", True)
-
-    def test_merge_resources_none_extension(self):
-        """Test adding an extension parameter with merge_resources."""
-        target = User[EnterpriseUser](user_name="test")
-        assert target[EnterpriseUser] is None
-
-        payload = {
-            "userName": "test",
-            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
-                "employeeNumber": "12345"
-            },
-        }
-        update = User[EnterpriseUser].model_validate(payload)
-
-        merge_resources(target, update)
-
-        assert target[EnterpriseUser].employee_number == "12345"

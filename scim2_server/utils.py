@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import EmailStr
 from pydantic import ValidationError
 from scim2_models import BaseModel
-from scim2_models import Extension
 from scim2_models import InvalidValueException
 from scim2_models import Mutability
 from scim2_models import MutabilityException
@@ -43,29 +42,6 @@ def load_default_schemas() -> dict[str, Schema]:
 def load_default_resource_types() -> dict[str, ResourceType]:
     """Load the default resource types from RFC 7643."""
     return load_scim_resource("default-resource-types.json", ResourceType)
-
-
-def merge_resources(target: Resource, updates: BaseModel):
-    """Merge a resource with another resource as specified for HTTP PUT (RFC 7644, section 3.5.1)."""
-    for set_attribute in updates.model_fields_set:
-        mutability = target.get_field_annotation(set_attribute, Mutability)
-        if mutability == Mutability.read_only:
-            continue
-        if isinstance(getattr(updates, set_attribute), Extension):
-            # This is a model extension, handle it as its own resource
-            # and don't simply overwrite it
-            target_extension = getattr(target, set_attribute)
-            if target_extension is None:
-                setattr(target, set_attribute, getattr(updates, set_attribute))
-            else:
-                merge_resources(target_extension, getattr(updates, set_attribute))
-            continue
-        new_value = getattr(updates, set_attribute)
-        if mutability == Mutability.immutable and getattr(
-            target, set_attribute
-        ) not in (None, new_value):
-            raise MutabilityException()
-        setattr(target, set_attribute, new_value)
 
 
 def get_by_alias(
