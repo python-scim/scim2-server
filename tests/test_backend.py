@@ -18,7 +18,7 @@ from scim2_server.backend import InMemoryBackend
 
 
 class TestBackend:
-    def test_unique_attributes(self, provider):
+    def test_unique_attributes(self, app):
         """The uniqueness constraints are read from the annotations of the model, extensions included."""
         foo_schema = Schema(
             id="urn:example:2.0:Foo",
@@ -59,9 +59,9 @@ class TestBackend:
         assert bar.get_attribute(resource) == "def"
         assert bar.get_attribute(FooBar(a="ABC")) is None
 
-    def test_unique_attributes_of_the_default_user(self, provider):
+    def test_unique_attributes_of_the_default_user(self, app):
         """The only uniqueness constraint checked on a User is userName, the id being assigned by the backend."""
-        User = provider.backend.get_model("User")
+        User = app.backend.get_model("User")
         assert InMemoryBackend.collect_unique_attrs(User) == [
             InMemoryBackend.UniquenessDescriptor(None, "user_name", False)
         ]
@@ -82,17 +82,17 @@ class TestBackend:
         with pytest.raises(UniquenessException):
             backend.create_resource("Badge", Badge(code="x"))
 
-    def test_unique_values_are_compared_with_unicode_case_folding(self, provider):
+    def test_unique_values_are_compared_with_unicode_case_folding(self, app):
         """Unicode case folding makes "Straße" and "STRASSE" the same value."""
-        backend = provider.backend
+        backend = app.backend
         User = backend.get_model("User")
         backend.create_resource("User", User(user_name="Straße"))
         with pytest.raises(UniquenessException):
             backend.create_resource("User", User(user_name="STRASSE"))
 
-    def test_query_resources_without_count_returns_every_resource(self, provider):
+    def test_query_resources_without_count_returns_every_resource(self, app):
         """A search request carrying no count is not paginated by the backend."""
-        backend = provider.backend
+        backend = app.backend
         for user_name in ("a", "b", "c"):
             backend.create_resource(
                 "User", backend.get_model("User")(user_name=user_name)
@@ -101,9 +101,9 @@ class TestBackend:
         assert total_results == 3
         assert len(resources) == 3
 
-    def test_query_resources_total_results_counts_beyond_the_page(self, provider):
+    def test_query_resources_total_results_counts_beyond_the_page(self, app):
         """The total results count every matching resource, not only the returned page."""
-        backend = provider.backend
+        backend = app.backend
         for user_name in ("a", "b", "c"):
             backend.create_resource(
                 "User", backend.get_model("User")(user_name=user_name)
@@ -114,8 +114,8 @@ class TestBackend:
         assert total_results == 3
         assert len(resources) == 1
 
-    def test_meta_resource_type_name(self, provider):
-        backend = provider.backend
+    def test_meta_resource_type_name(self, app):
+        backend = app.backend
         backend.resource_types["User"] = backend.resource_types["User"].model_copy(
             update={"name": "User RT Name"}
         )
@@ -148,10 +148,10 @@ class TestBackend:
 
 @pytest.mark.parametrize("resource_type_id", ["User", None])
 def test_query_resources_binds_a_filter_that_names_no_resource_type(
-    provider, resource_type_id
+    app, resource_type_id
 ):
     """A filter left unbound is resolved against the resource types being queried."""
-    backend = provider.backend
+    backend = app.backend
     for user_name in ("alice", "bob"):
         backend.create_resource("User", backend.get_model("User")(user_name=user_name))
     request = SearchRequest(filter='userName eq "bob"')

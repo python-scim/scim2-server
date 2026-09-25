@@ -52,16 +52,16 @@ SEARCH_REQUEST_PARAMETERS = (
 )
 
 
-class SCIMProvider:
+class SCIMApplication:
     """A WSGI application implementing a SCIM provider (server)."""
 
     def __init__(self, backend: Backend):
         self.bearer_tokens = set()
         self.backend = backend
         self.page_size = 50
-        self.log = logging.getLogger("SCIMProvider")
+        self.log = logging.getLogger("SCIMApplication")
 
-        # Register the URL mapping. The endpoint refers to the name of the function to be called in this SCIMProvider ("call_" + endpoint).
+        # Register the URL mapping. The endpoint refers to the name of the function to be called in this SCIMApplication ("call_" + endpoint).
         rules = itertools.chain.from_iterable(
             [
                 Rule(

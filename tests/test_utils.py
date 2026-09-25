@@ -47,8 +47,8 @@ class TestUtils:
             ),
         )
 
-    def test_match_filter(self, provider):
-        user = provider.backend.get_model("User").model_validate(
+    def test_match_filter(self, app):
+        user = app.backend.get_model("User").model_validate(
             {
                 "schemas": [
                     "urn:ietf:params:scim:schemas:core:2.0:User",
@@ -173,8 +173,8 @@ class TestUtils:
             'emails[type eq "work" and value co "@example.com"] or ims[type eq "xmpp" and value co "@foo.com"]'
         )
 
-    def test_attribute_resolving(self, provider):
-        user = provider.backend.get_model("User").model_validate(
+    def test_attribute_resolving(self, app):
+        user = app.backend.get_model("User").model_validate(
             {
                 "schemas": [
                     "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
@@ -275,7 +275,7 @@ class TestUtils:
             "Emails",
         )
 
-    def test_dump_creation(self, provider):
+    def test_dump_creation(self, app):
         user = User(id="1", user_name="ABC")
         user.name = Name(formatted="Barbara")
         user.meta = Meta(
@@ -284,7 +284,7 @@ class TestUtils:
         )
         user.model_dump(scim_ctx=Context.RESOURCE_CREATION_RESPONSE)
 
-    def test_dump_extension(self, provider):
+    def test_dump_extension(self, app):
         user = User[EnterpriseUser].model_validate(
             {
                 "userName": "thomas38@harding-herman.com",

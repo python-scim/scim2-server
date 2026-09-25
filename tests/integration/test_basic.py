@@ -7,7 +7,7 @@ from scim2_models import PatchOperation
 from scim2_models import User
 
 
-class TestSCIMProviderBasic:
+class TestSCIMApplicationBasic:
     def test_user_creation(self, wsgi):
         payload = {
             "schemas": [
@@ -95,8 +95,8 @@ class TestSCIMProviderBasic:
         assert r.status_code == 200
         assert r.json()["userName"] == "bjensen2@example.com"
 
-    def test_sort(self, provider, wsgi):
-        TypedListResponse = ListResponse[Union[tuple(provider.backend.get_models())]]  # noqa: UP007
+    def test_sort(self, app, wsgi):
+        TypedListResponse = ListResponse[Union[tuple(app.backend.get_models())]]  # noqa: UP007
 
         def assert_sorted(sort_by: str, sorted: list[str], endpoint: str = "/v2/Users"):
             for order_by, inverted in (

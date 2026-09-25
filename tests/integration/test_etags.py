@@ -1,4 +1,4 @@
-class TestSCIMProviderETags:
+class TestSCIMApplicationETags:
     def test_resource_get_etag_match(self, wsgi, first_fake_user):
         r = wsgi.get(
             f"/v2/Users/{first_fake_user}",

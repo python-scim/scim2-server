@@ -5,7 +5,7 @@ import httpx2
 import pytest
 
 from scim2_server.backend import InMemoryBackend
-from scim2_server.provider import SCIMProvider
+from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 
@@ -32,22 +32,22 @@ def fake_user_data():
 
 
 @pytest.fixture
-def provider(backend, static_data):
-    provider = SCIMProvider(backend)
+def app(backend, static_data):
+    app = SCIMApplication(backend)
     for schema in static_data[0].values():
-        provider.register_schema(schema)
+        app.register_schema(schema)
     for resource_type in static_data[1].values():
-        provider.register_resource_type(resource_type)
-    return provider
+        app.register_resource_type(resource_type)
+    return app
 
 
 @pytest.fixture
-def wsgi(provider):
-    transport = httpx2.WSGITransport(app=provider)
+def wsgi(app):
+    transport = httpx2.WSGITransport(app=app)
     client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
     client.__enter__()
     yield client
-    provider.backend.resources = []
+    app.backend.resources = []
     client.__exit__(None, None, None)
 
 

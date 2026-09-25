@@ -8,8 +8,8 @@ from scim2_server.operators import patch_resource
 
 
 class TestPatch:
-    def test_patch_operation_add_simple(self, provider):
-        user = provider.backend.get_model("User")(id="123")
+    def test_patch_operation_add_simple(self, app):
+        user = app.backend.get_model("User")(id="123")
         patch_resource(
             user,
             PatchOperation(
@@ -63,8 +63,8 @@ class TestPatch:
             "userName": "Bar",
         }
 
-    def test_patch_operation_add_complex(self, provider):
-        user = provider.backend.get_model("User")(id="123")
+    def test_patch_operation_add_complex(self, app):
+        user = app.backend.get_model("User")(id="123")
         patch_resource(
             user,
             PatchOperation(
@@ -143,8 +143,8 @@ class TestPatch:
             },
         }
 
-    def test_patch_operation_add_multi_valued(self, provider):
-        user = provider.backend.get_model("User")(id="123")
+    def test_patch_operation_add_multi_valued(self, app):
+        user = app.backend.get_model("User")(id="123")
         patch_resource(
             user,
             PatchOperation(

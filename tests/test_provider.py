@@ -4,8 +4,8 @@ from scim2_models import Context
 
 
 class TestProvider:
-    def test_user_creation(self, provider):
-        user_model = provider.backend.get_model("User").model_validate(
+    def test_user_creation(self, app):
+        user_model = app.backend.get_model("User").model_validate(
             {
                 "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
                 "userName": "bjensen@example.com",
@@ -21,10 +21,10 @@ class TestProvider:
             },
             scim_ctx=Context.RESOURCE_CREATION_REQUEST,
         )
-        ret = provider.backend.create_resource("User", user_model)
+        ret = app.backend.create_resource("User", user_model)
         assert ret.id is not None
 
-    def test_generic_exception_handling(self, provider):
+    def test_generic_exception_handling(self, app):
         """Test that generic exceptions are properly handled and return 500 status."""
         from werkzeug import Request
 
@@ -41,11 +41,11 @@ class TestProvider:
 
         # Mock to force a generic exception during request processing
         with patch.object(
-            provider,
+            app,
             "call_service_provider_config",
             side_effect=RuntimeError("Test error"),
         ):
-            response = provider.wsgi_app(request, environ)
+            response = app.wsgi_app(request, environ)
 
             # Should return a Response object with status 500
             assert response.status_code == 500

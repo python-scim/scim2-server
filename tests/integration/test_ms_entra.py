@@ -3,7 +3,7 @@ import uuid
 import pytest
 
 
-class TestSCIMProviderMSEntraIntegration:
+class TestSCIMApplicationMSEntraIntegration:
     """Tests based on Postman tests from Azure docs.
 
     https://github.com/AzureAD/SCIMReferenceCode/wiki/Test-Your-SCIM-Endpoint

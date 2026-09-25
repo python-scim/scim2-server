@@ -8,7 +8,7 @@ from scim2_models import Schema
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scim2_server.backend import InMemoryBackend
-from scim2_server.provider import SCIMProvider
+from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 
@@ -56,7 +56,7 @@ def main():
     from werkzeug.serving import run_simple
 
     backend = InMemoryBackend()
-    app = SCIMProvider(backend)
+    app = SCIMApplication(backend)
 
     if args.schema is None:
         for schema in load_default_schemas().values():

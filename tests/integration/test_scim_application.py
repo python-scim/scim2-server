@@ -8,11 +8,11 @@ from scim2_models import SearchRequest
 from tests.utils import compare_dicts
 
 
-class TestSCIMProvider:
-    """End-to-end tests for the SCIMProvider."""
+class TestSCIMApplication:
+    """End-to-end tests for the SCIMApplication."""
 
-    def test_location_mapping(self, provider):
-        transport = httpx2.WSGITransport(app=provider, script_name="/foo/bar")
+    def test_location_mapping(self, app):
+        transport = httpx2.WSGITransport(app=app, script_name="/foo/bar")
         with httpx2.Client(
             transport=transport, base_url="https://sub.testserver.company:1234"
         ) as client:
@@ -386,11 +386,9 @@ class TestSCIMProvider:
             "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User" not in r.json()
         )
 
-    def test_resource_put_keeps_an_omitted_password(
-        self, provider, wsgi, first_fake_user
-    ):
+    def test_resource_put_keeps_an_omitted_password(self, app, wsgi, first_fake_user):
         """A client never gets the password back, so omitting it does not clear it."""
-        stored = provider.backend.get_resource("User", first_fake_user)
+        stored = app.backend.get_resource("User", first_fake_user)
         assert stored.password is not None
 
         r = wsgi.put(
@@ -398,11 +396,11 @@ class TestSCIMProvider:
             json={"userName": "joseph96@williams-brown.com"},
         )
         assert r.status_code == 200
-        replaced = provider.backend.get_resource("User", first_fake_user)
+        replaced = app.backend.get_resource("User", first_fake_user)
         assert replaced.password == stored.password
 
     def test_resource_put_clears_a_password_set_to_null(
-        self, provider, wsgi, first_fake_user
+        self, app, wsgi, first_fake_user
     ):
         """An explicit null is how RFC 7644 §3.5.1 lets a client clear a value."""
         r = wsgi.put(
@@ -410,7 +408,7 @@ class TestSCIMProvider:
             json={"userName": "joseph96@williams-brown.com", "password": None},
         )
         assert r.status_code == 200
-        assert provider.backend.get_resource("User", first_fake_user).password is None
+        assert app.backend.get_resource("User", first_fake_user).password is None
 
     def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
         """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""
@@ -687,10 +685,10 @@ class TestSCIMProvider:
 
     @pytest.mark.parametrize("payload", [{}, {"count": 10}])
     def test_search_post_is_capped_to_page_size(
-        self, provider, wsgi, fake_user_data, payload
+        self, app, wsgi, fake_user_data, payload
     ):
         """A POST search is paginated with the server page size as a GET is."""
-        provider.page_size = 2
+        app.page_size = 2
         for user in fake_user_data[:3]:
             wsgi.post("/v2/Users", json=user)
         r = wsgi.post(
@@ -853,10 +851,10 @@ class TestSCIMProvider:
         assert j["meta"]["created"] == "2024-03-14T06:00:00Z"
         assert j["meta"]["lastModified"] == "2024-03-16T08:30:00Z"
 
-    def test_authentication(self, first_fake_user, provider, wsgi):
+    def test_authentication(self, first_fake_user, app, wsgi):
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert "WWW-Authenticate" not in r.headers
-        provider.register_bearer_token("SuperSecretToken")
+        app.register_bearer_token("SuperSecretToken")
 
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert "WWW-Authenticate" in r.headers
