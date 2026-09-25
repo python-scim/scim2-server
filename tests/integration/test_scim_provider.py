@@ -1,6 +1,7 @@
 import datetime
 
 import httpx
+import pytest
 import time_machine
 from scim2_models import SearchRequest
 
@@ -535,6 +536,53 @@ class TestSCIMProvider:
         r = wsgi.get("/v2/InvalidResourceType")
         assert r.status_code == 404
 
+    @pytest.mark.parametrize("parameter", ["count", "startIndex"])
+    def test_search_non_integer_pagination_is_refused(self, wsgi, parameter):
+        """A pagination parameter that is not an integer is a syntax error."""
+        r = wsgi.get("/v2/Users", params={parameter: "abc"})
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidSyntax"
+
+    @pytest.mark.parametrize("endpoint", ["/v2/Users", "/v2/"])
+    def test_search_filter_on_undeclared_attribute_is_refused(self, wsgi, endpoint):
+        """A filter naming an attribute no served resource type declares is invalid."""
+        r = wsgi.get(endpoint, params={"filter": 'unknownAttribute eq "a"'})
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidFilter"
+
+    def test_search_malformed_filter_is_refused(self, wsgi):
+        """A filter that does not parse is invalid."""
+        r = wsgi.get("/v2/Users", params={"filter": "userName eq"})
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidFilter"
+
+    @pytest.mark.parametrize("endpoint", ["/v2/Users", "/v2/"])
+    def test_search_sort_on_undeclared_attribute_is_refused(self, wsgi, endpoint):
+        """Sorting on an attribute no served resource type declares is refused."""
+        r = wsgi.get(endpoint, params={"sortBy": "unknownAttribute"})
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidPath"
+
+    def test_search_post_sort_on_undeclared_attribute_is_refused(self, wsgi):
+        """A POST search is checked against the served resource types as a GET is."""
+        r = wsgi.post(
+            "/v2/Users/.search",
+            json=SearchRequest(sort_by="unknownAttribute").model_dump(),
+        )
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidPath"
+
+    def test_search_invalid_sort_order_is_refused(self, wsgi):
+        """RFC 7644 §3.4.2.3 only allows "ascending" and "descending"."""
+        r = wsgi.get("/v2/Users", params={"sortBy": "userName", "sortOrder": "bogus"})
+        assert r.status_code == 400
+
+    def test_search_ignores_unrelated_query_parameters(self, wsgi, first_fake_user):
+        """Query parameters RFC 7644 §3.4.2 does not define are ignored."""
+        r = wsgi.get("/v2/Users", params={"foo": "bar"})
+        assert r.status_code == 200
+        assert r.json()["totalResults"] == 1
+
     def test_search_total_results_counts_beyond_the_page(self, wsgi, fake_user_data):
         """The total results count every matching resource, not only the returned page."""
         for user in fake_user_data[:3]:
@@ -553,6 +601,27 @@ class TestSCIMProvider:
         assert r.json()["totalResults"] == 3
         assert r.json()["itemsPerPage"] == 1
         assert len(r.json()["Resources"]) == 1
+
+    @pytest.mark.parametrize("payload", [{}, {"count": 10}])
+    def test_search_post_is_capped_to_page_size(
+        self, provider, wsgi, fake_user_data, payload
+    ):
+        """A POST search is paginated with the server page size as a GET is."""
+        provider.page_size = 2
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.post(
+            "/v2/Users/.search",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+                **payload,
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["totalResults"] == 3
+        assert r.json()["itemsPerPage"] == 2
+        assert r.json()["startIndex"] == 1
+        assert len(r.json()["Resources"]) == 2
 
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""

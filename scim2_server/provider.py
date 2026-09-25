@@ -42,6 +42,16 @@ from scim2_server.backend import Backend
 from scim2_server.operators import patch_resource
 from scim2_server.utils import merge_resources
 
+SEARCH_REQUEST_PARAMETERS = (
+    "attributes",
+    "excludedAttributes",
+    "filter",
+    "sortBy",
+    "sortOrder",
+    "startIndex",
+    "count",
+)
+
 
 class SCIMProvider:
     """A WSGI application implementing a SCIM provider (server)."""
@@ -263,40 +273,42 @@ class SCIMProvider:
             }
         )
 
-    def build_search_request(self, request: Request) -> SearchRequest:
+    def build_search_request(
+        self, request: Request, models: list[type[Resource]]
+    ) -> SearchRequest:
         """Construct a SearchRequest object from a werkzeug request.
 
         :param request: werkzeug request
+        :param models: The resource models the queried endpoint serves.
         :return: SearchRequest instance
         """
         if request.method == "POST":
             # This was a POST against /.search, see RFC 7644, Section 3.4.3
-            return SearchRequest.model_validate(
-                request.json, scim_ctx=Context.SEARCH_REQUEST
-            )
-        count = min(int(request.args.get("count", self.page_size)), self.page_size)
-        start_index = max(1, int(request.args.get("startIndex", 1)))
-        search_request = SearchRequest(
-            start_index=start_index,
-            count=count,
-            filter=request.args.get("filter"),
+            payload = request.json
+        else:
+            payload = {
+                key: request.args[key]
+                for key in SEARCH_REQUEST_PARAMETERS
+                if key in request.args
+            }
+        search_request = SearchRequest[Union[tuple(models)]].model_validate(  # noqa: UP007
+            payload, scim_ctx=Context.SEARCH_REQUEST
         )
-        if "attributes" in request.args:
-            search_request.attributes = [
-                a.strip() for a in request.args["attributes"].split(",")
-            ]
-        if "excludedAttributes" in request.args:
-            search_request.excluded_attributes = [
-                a.strip() for a in request.args["excludedAttributes"].split(",")
-            ]
-        if "sortBy" in request.args:
-            search_request.sort_by = request.args["sortBy"]
-        if request.args.get("sortOrder") == "descending":
-            search_request.sort_order = SearchRequest.SortOrder.descending
+        search_request.start_index = search_request.start_index or 1
+        search_request.count = (
+            self.page_size
+            if search_request.count is None
+            else min(search_request.count, self.page_size)
+        )
         return search_request
 
     def query_resource(self, request: Request, resource: ResourceType | None):
-        search_request = self.build_search_request(request)
+        models = (
+            list(self.backend.get_models())
+            if resource is None
+            else [self.backend.get_model(resource.id)]
+        )
+        search_request = self.build_search_request(request, models)
 
         kwargs = {}
         if resource is not None:

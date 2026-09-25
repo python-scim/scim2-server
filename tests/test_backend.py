@@ -84,6 +84,17 @@ class TestBackend:
         assert desc_1.get_attribute(res) == "ABC"
         assert desc_2.get_attribute(res) == "DEF"
 
+    def test_query_resources_without_count_returns_every_resource(self, provider):
+        """A search request carrying no count is not paginated by the backend."""
+        backend = provider.backend
+        for user_name in ("a", "b", "c"):
+            backend.create_resource(
+                "User", backend.get_model("User")(user_name=user_name)
+            )
+        total_results, resources = backend.query_resources(SearchRequest(), "User")
+        assert total_results == 3
+        assert len(resources) == 3
+
     def test_query_resources_total_results_counts_beyond_the_page(self, provider):
         """The total results count every matching resource, not only the returned page."""
         backend = provider.backend
