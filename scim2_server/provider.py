@@ -2,6 +2,7 @@ import itertools
 import json
 import logging
 import traceback
+from typing import Any
 from typing import Union
 from typing import cast
 from urllib.parse import urljoin
@@ -142,18 +143,37 @@ class SCIMApplication:
             None,
         )
 
+    @property
+    def etag_supported(self) -> bool:
+        """Whether the configuration declares the resources versioned with ETags."""
+        return bool(self.config.etag and self.config.etag.supported)
+
+    def publish(self, request: Request, resource: Resource) -> Resource:
+        """Return a copy of a resource in the form sent to the client.
+
+        Its location is made absolute from the URL the client requested, and
+        its version is left out when the service does not support ETags.
+        """
+        update: dict[str, Any] = {
+            "location": urljoin(request.url + "/", resource.meta.location)
+        }
+        if not self.etag_supported:
+            update["version"] = None
+        return resource.model_copy(
+            update={"meta": resource.meta.model_copy(update=update)}
+        )
+
     @staticmethod
-    def adjust_location(request: Request, resource: Resource):
-        """Make the "meta.location" of a resource absolute, from the URL the client requested."""
-        resource.meta.location = urljoin(request.url + "/", resource.meta.location)
+    def etag_header(resource: Resource) -> dict[str, str]:
+        """Return the ETag header of a published resource, if it has a version."""
+        return {"ETag": resource.meta.version} if resource.meta.version else {}
 
     def apply_patch_operation(self, resource: Resource, patch_operation):
         """Apply a PATCH operation to a resource."""
         for op in patch_operation.operations:
             patch_resource(resource, op)
 
-    @staticmethod
-    def check_preconditions(request: Request, resource: Resource) -> bool:
+    def check_preconditions(self, request: Request, resource: Resource) -> bool:
         """Evaluate the "If-Match" and "If-None-Match" headers against a resource.
 
         RFC 7232 §6 evaluates "If-Match" first: a failed "If-Match" answers
@@ -163,7 +183,11 @@ class SCIMApplication:
         :return: :data:`False` when a GET should answer 304 Not Modified.
         :raises PreconditionFailed: When the method must not be performed.
         """
-        version, _ = unquote_etag(resource.meta.version)
+        # A service that does not support ETags has no tag to match: RFC 7232
+        # §3.1 fails an If-Match listing tags, and lets "*" pass.
+        version, _ = (
+            unquote_etag(resource.meta.version) if self.etag_supported else (None, None)
+        )
         # RFC 7232 §3.1 compares If-Match strongly, which would never match
         # the weak ETags RFC 7644 §3.14 recommends and sends in its example.
         if request.if_match and not request.if_match.contains_weak(version):
@@ -188,16 +212,16 @@ class SCIMApplication:
                 resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
+                resource = self.publish(request, resource)
                 if not self.check_preconditions(request, resource):
                     # RFC 7232 §4.1: a 304 carries the ETag a 200 would have
                     return self.make_response(
-                        None, status=304, headers={"ETag": resource.meta.version}
+                        None, status=304, headers=self.etag_header(resource)
                     )
 
                 response_parameters = self.get_response_parameters(
                     request, self.get_model(resource_type)
                 )
-                self.adjust_location(request, resource)
                 return self.make_response(
                     resource.model_dump(
                         scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
@@ -225,7 +249,7 @@ class SCIMApplication:
                 )
                 replacement.replace(resource)
                 updated = self.backend.update_resource(resource_type, replacement)
-                self.adjust_location(request, updated)
+                updated = self.publish(request, updated)
                 return self.make_response(
                     updated.model_dump(
                         scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
@@ -261,7 +285,7 @@ class SCIMApplication:
                     response_parameters.attributes
                     or response_parameters.excluded_attributes
                 ):
-                    self.adjust_location(request, updated)
+                    updated = self.publish(request, updated)
                     return self.make_response(
                         updated.model_dump(
                             scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
@@ -273,7 +297,9 @@ class SCIMApplication:
                     # A PATCH operation MAY return a 204 (no content)
                     # if no attributes were requested
                     return self.make_response(
-                        None, 204, headers={"ETag": updated.meta.version}
+                        None,
+                        204,
+                        headers=self.etag_header(self.publish(request, updated)),
                     )
 
     @staticmethod
@@ -335,8 +361,7 @@ class SCIMApplication:
         total_results, results = self.backend.query_resources(
             search_request=search_request, resource_type=resource
         )
-        for r in results:
-            self.adjust_location(request, r)
+        results = [self.publish(request, r) for r in results]
 
         resources = [
             s.model_dump(
@@ -373,7 +398,7 @@ class SCIMApplication:
                     payload, scim_ctx=Context.RESOURCE_CREATION_REQUEST
                 )
                 created_resource = self.backend.create_resource(resource_type, resource)
-                self.adjust_location(request, created_resource)
+                created_resource = self.publish(request, created_resource)
                 return self.make_response(
                     created_resource.model_dump(
                         scim_ctx=Context.RESOURCE_CREATION_RESPONSE
