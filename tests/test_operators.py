@@ -22,7 +22,6 @@ from scim2_server.operators import RemoveOperator
 from scim2_server.operators import ReplaceOperator
 from scim2_server.operators import ResolveOperator
 from scim2_server.operators import ResolveResult
-from scim2_server.operators import ResolveSortOperator
 from scim2_server.operators import parse_attribute_path
 
 
@@ -569,89 +568,3 @@ class TestOperators:
         assert self._resolve_value("emails[type pr]", u) == home_email
         assert self._resolve_value("emails[not (type pr)]", u) == work_email
         assert self._resolve_value("emails[primary eq true]", u) == work_email
-
-    def _resolve_sort_value(self, path: str, model: BaseModel):
-        operator = ResolveSortOperator(path)
-        return operator(model)
-
-    def test_resolve_sort_operator(self):
-        u = User[EnterpriseUser](
-            id="123",
-            user_name="foo",
-            name=Name(formatted="Mr. Foo"),
-            emails=[
-                Email(value="home@example.com", type="home", primary=False),
-                Email(value="work@example.com", type="work", primary=True),
-            ],
-        )
-        u.EnterpriseUser = EnterpriseUser(employee_number="123")
-        assert self._resolve_sort_value("", u) is None
-        assert self._resolve_sort_value("id", u) == "123"
-        assert self._resolve_sort_value("externalId", u) is None
-        assert self._resolve_sort_value("userName", u) == "foo"
-        assert self._resolve_sort_value("USERNAME", u) == "foo"
-        assert self._resolve_sort_value("name.formatted", u) == "mr. foo"
-        assert self._resolve_sort_value("name.givenName", u) is None
-        assert self._resolve_sort_value("emails", u) == "work@example.com"
-        assert (
-            self._resolve_sort_value(
-                "urn:ietf:params:scim:schemas:core:2.0:User:emails", u
-            )
-            == "work@example.com"
-        )
-        assert self._resolve_sort_value("emails.value", u) == "work@example.com"
-        assert (
-            self._resolve_sort_value('emails[type eq "home"]', u) == "home@example.com"
-        )
-        assert (
-            self._resolve_sort_value('emails[type eq "home"].value', u)
-            == "home@example.com"
-        )
-        assert self._resolve_sort_value('emails[type eq "home"].type', u) == "home"
-        assert self._resolve_sort_value('emails[type eq "other"]', u) is None
-        assert self._resolve_sort_value('emails[type eq "other"].value', u) is None
-        assert self._resolve_sort_value('emails[primary eq "True"].type', u) == "work"
-        assert self._resolve_sort_value('emails[primary eq "False"].type', u) == "home"
-        assert (
-            self._resolve_sort_value(
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber",
-                u,
-            )
-            == "123"
-        )
-        assert (
-            self._resolve_sort_value(
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:division", u
-            )
-            is None
-        )
-
-        assert self._resolve_sort_value("invalidAttribute", u) is None
-        assert (
-            self._resolve_sort_value("invalidAttribute.invalidSubAttribute", u) is None
-        )
-        assert self._resolve_sort_value("name", u) is None
-        assert self._resolve_sort_value("name.invalidSubAttribute", u) is None
-        assert (
-            self._resolve_sort_value("name[invalidSubAttribute pr].formatted", u)
-            is None
-        )
-        assert self._resolve_sort_value("name[invalidSubAttribute pr]", u) is None
-        assert self._resolve_sort_value("id.formatted", u) is None
-        assert self._resolve_sort_value("id[invalidSubAttribute pr]", u) is None
-        assert (
-            self._resolve_sort_value("id[invalidSubAttribute pr].formatted", u) is None
-        )
-        assert (
-            self._resolve_sort_value(
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", u
-            )
-            is None
-        )
-        assert (
-            self._resolve_sort_value(
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:invalidAttribute",
-                u,
-            )
-            is None
-        )

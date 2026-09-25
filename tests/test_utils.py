@@ -1,18 +1,13 @@
-from typing import Annotated
-
 import pytest
 from scim2_filter_parser.lexer import SCIMLexer
 from scim2_filter_parser.parser import SCIMParser
-from scim2_models import URN
 from scim2_models import Context
 from scim2_models import EnterpriseUser
 from scim2_models import InvalidFilterException
 from scim2_models import Meta
-from scim2_models import Mutability
 from scim2_models import MutabilityException
 from scim2_models import Name
 from scim2_models import NoTargetException
-from scim2_models import Resource
 from scim2_models import ResponseParameters
 from scim2_models import SensitiveException
 from scim2_models import User
@@ -20,7 +15,8 @@ from scim2_models import User
 from scim2_server.filter import evaluate_filter
 from scim2_server.operators import ResolveOperator
 from scim2_server.utils import get_or_create
-from scim2_server.utils import merge_resources
+from scim2_server.utils import load_default_provider
+from scim2_server.utils import load_default_schemas
 
 
 class TestUtils:
@@ -53,8 +49,8 @@ class TestUtils:
             ),
         )
 
-    def test_match_filter(self, provider):
-        user = provider.backend.get_model("User").model_validate(
+    def test_match_filter(self, app):
+        user = app.provider.model_for("User").model_validate(
             {
                 "schemas": [
                     "urn:ietf:params:scim:schemas:core:2.0:User",
@@ -179,8 +175,8 @@ class TestUtils:
             'emails[type eq "work" and value co "@example.com"] or ims[type eq "xmpp" and value co "@foo.com"]'
         )
 
-    def test_attribute_resolving(self, provider):
-        user = provider.backend.get_model("User").model_validate(
+    def test_attribute_resolving(self, app):
+        user = app.provider.model_for("User").model_validate(
             {
                 "schemas": [
                     "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
@@ -281,7 +277,7 @@ class TestUtils:
             "Emails",
         )
 
-    def test_dump_creation(self, provider):
+    def test_dump_creation(self, app):
         user = User(id="1", user_name="ABC")
         user.name = Name(formatted="Barbara")
         user.meta = Meta(
@@ -290,7 +286,7 @@ class TestUtils:
         )
         user.model_dump(scim_ctx=Context.RESOURCE_CREATION_RESPONSE)
 
-    def test_dump_extension(self, provider):
+    def test_dump_extension(self, app):
         user = User[EnterpriseUser].model_validate(
             {
                 "userName": "thomas38@harding-herman.com",
@@ -362,36 +358,14 @@ class TestUtils:
             },
         }
 
-    def test_merge_resources_immutable(self):
-        class Foo(Resource):
-            __schema__ = URN("urn:example:2.0:Foo")
-            immutable_string: Annotated[str | None, Mutability.immutable] = None
-
-        stored = Foo()
-        merge_resources(stored, Foo(immutable_string="ABC"))
-        assert stored.immutable_string == "ABC"
-        merge_resources(stored, Foo(immutable_string="ABC"))
-        with pytest.raises(MutabilityException):
-            merge_resources(stored, Foo(immutable_string="D"))
-
     def test_get_or_create_mutability(self):
         u = User()
         with pytest.raises(MutabilityException):
             get_or_create(u, "groups", True)
 
-    def test_merge_resources_none_extension(self):
-        """Test adding an extension parameter with merge_resources."""
-        target = User[EnterpriseUser](user_name="test")
-        assert target[EnterpriseUser] is None
 
-        payload = {
-            "userName": "test",
-            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
-                "employeeNumber": "12345"
-            },
-        }
-        update = User[EnterpriseUser].model_validate(payload)
-
-        merge_resources(target, update)
-
-        assert target[EnterpriseUser].employee_number == "12345"
+def test_the_default_provider_publishes_the_default_schemas():
+    """The schemas rebuilt from the default models are the ones the package ships."""
+    published = [schema.model_dump() for schema in load_default_provider().schemas]
+    shipped = [schema.model_dump() for schema in load_default_schemas().values()]
+    assert published == shipped

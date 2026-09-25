@@ -3,11 +3,23 @@ import json
 
 import httpx2
 import pytest
+from scim2_models import ScimProvider
 
 from scim2_server.backend import InMemoryBackend
-from scim2_server.provider import SCIMProvider
+from scim2_server.provider import SCIMApplication
+from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
+
+
+@pytest.fixture(scope="session")
+def scim_provider():
+    return load_default_provider()
+
+
+@pytest.fixture(scope="session")
+def user_type(scim_provider):
+    return next(rt for rt in scim_provider.resource_types if rt.id == "User")
 
 
 @pytest.fixture
@@ -32,23 +44,39 @@ def fake_user_data():
 
 
 @pytest.fixture
-def provider(backend, static_data):
-    provider = SCIMProvider(backend)
-    for schema in static_data[0].values():
-        provider.register_schema(schema)
-    for resource_type in static_data[1].values():
-        provider.register_resource_type(resource_type)
-    return provider
+def app(backend, scim_provider):
+    return SCIMApplication(backend, scim_provider)
 
 
 @pytest.fixture
-def wsgi(provider):
-    transport = httpx2.WSGITransport(app=provider)
+def wsgi(app):
+    transport = httpx2.WSGITransport(app=app)
     client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
     client.__enter__()
     yield client
-    provider.backend.resources = []
+    app.backend.resources = []
     client.__exit__(None, None, None)
+
+
+@pytest.fixture
+def wsgi_with(backend, scim_provider):
+    """Build clients of applications serving the default resources under another configuration."""
+    clients = []
+
+    def build(config):
+        provider = ScimProvider(
+            models=scim_provider.models,
+            resource_types=scim_provider.resource_types,
+            config=config,
+        )
+        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
+        clients.append(client)
+        return client
+
+    yield build
+    for client in clients:
+        client.close()
 
 
 @pytest.fixture

@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import EmailStr
 from pydantic import ValidationError
 from scim2_models import BaseModel
-from scim2_models import Extension
 from scim2_models import InvalidValueException
 from scim2_models import Mutability
 from scim2_models import MutabilityException
@@ -16,9 +15,11 @@ from scim2_models import NoTargetException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
+from scim2_models import ScimProvider
+from scim2_models import ServiceProviderConfig
 
 
-def load_json_resource(json_name: str) -> list:
+def load_json_resource(json_name: str) -> Any:
     """Load a JSON document from the scim2_server package resources."""
     fp = importlib.resources.files("scim2_server") / "resources" / json_name
     with open(fp) as f:
@@ -45,27 +46,20 @@ def load_default_resource_types() -> dict[str, ResourceType]:
     return load_scim_resource("default-resource-types.json", ResourceType)
 
 
-def merge_resources(target: Resource, updates: BaseModel):
-    """Merge a resource with another resource as specified for HTTP PUT (RFC 7644, section 3.5.1)."""
-    for set_attribute in updates.model_fields_set:
-        mutability = target.get_field_annotation(set_attribute, Mutability)
-        if mutability == Mutability.read_only:
-            continue
-        if isinstance(getattr(updates, set_attribute), Extension):
-            # This is a model extension, handle it as its own resource
-            # and don't simply overwrite it
-            target_extension = getattr(target, set_attribute)
-            if target_extension is None:
-                setattr(target, set_attribute, getattr(updates, set_attribute))
-            else:
-                merge_resources(target_extension, getattr(updates, set_attribute))
-            continue
-        new_value = getattr(updates, set_attribute)
-        if mutability == Mutability.immutable and getattr(
-            target, set_attribute
-        ) not in (None, new_value):
-            raise MutabilityException()
-        setattr(target, set_attribute, new_value)
+def load_default_service_provider_config() -> ServiceProviderConfig:
+    """Load the default service provider configuration."""
+    return ServiceProviderConfig.model_validate(
+        load_json_resource("default-service-provider-config.json")
+    )
+
+
+def load_default_provider() -> ScimProvider:
+    """Describe a service serving the default schemas, resource types and configuration."""
+    return ScimProvider.from_discovery(
+        load_default_schemas().values(),
+        load_default_resource_types().values(),
+        config=load_default_service_provider_config(),
+    )
 
 
 def get_by_alias(

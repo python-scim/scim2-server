@@ -19,14 +19,15 @@ The only optional feature currently missing is support for Bulk operations ([RFC
 ## Usage
 
 ```shell
-$ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--bearer-token BEARER_TOKEN] [--hostname HOSTNAME] [--port PORT] [--reverse-proxy] [--dump-resources DUMP_RESOURCES] [--debug]
+$ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--service-provider-config SERVICE_PROVIDER_CONFIG] [--bearer-token BEARER_TOKEN] [--hostname HOSTNAME] [--port PORT] [--reverse-proxy] [--dump-resources DUMP_RESOURCES] [--debug]
 ```
 
 - `-h`/`--help`: Show help message
 - `--reverse-proxy`: Allow using the provider behind a Reverse Proxy (required for URL rewriting).
 - `--schema`: Register schemas from specified JSON file. If not provided, loads the default schemas from RFC 7643.
 - `--resource-type`: Register resource types from specified JSON file. If not provided, loads the default resource types from RFC 7643.
-- `--bearer-token`: Registers a bearer token that can be used for accessing the service. If no tokens are provided, anonymous access without authentication is allowed.
+- `--service-provider-config`: Load the service provider configuration from specified JSON file. If not provided, loads the default configuration.
+- `--bearer-token`: Registers a bearer token that can be used for accessing the service, and announces the bearer token authentication scheme. If no tokens are provided, anonymous access without authentication is allowed.
 - `--hostname`: The hostname to listen on. Defaults to `127.0.0.1`.
 - `--port`: The port to listen on. Defaults to `8080`.
 - `--dump-resources`: Dump a JSON document containing all resources when the provider exits normally.

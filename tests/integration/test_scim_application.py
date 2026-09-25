@@ -3,16 +3,27 @@ import datetime
 import httpx2
 import pytest
 import time_machine
+from scim2_models import Bulk
+from scim2_models import ChangePassword
+from scim2_models import ETag
+from scim2_models import Filter
+from scim2_models import Patch
+from scim2_models import ScimProvider
 from scim2_models import SearchRequest
+from scim2_models import ServiceProviderConfig
+from scim2_models import Sort
+from scim2_models import User
 
+from scim2_server.provider import SCIMApplication
+from scim2_server.utils import load_default_service_provider_config
 from tests.utils import compare_dicts
 
 
-class TestSCIMProvider:
-    """End-to-end tests for the SCIMProvider."""
+class TestSCIMApplication:
+    """End-to-end tests for the SCIMApplication."""
 
-    def test_location_mapping(self, provider):
-        transport = httpx2.WSGITransport(app=provider, script_name="/foo/bar")
+    def test_location_mapping(self, app):
+        transport = httpx2.WSGITransport(app=app, script_name="/foo/bar")
         with httpx2.Client(
             transport=transport, base_url="https://sub.testserver.company:1234"
         ) as client:
@@ -42,7 +53,6 @@ class TestSCIMProvider:
                 "supported": False,
             },
             "changePassword": {"supported": True},
-            "documentationUri": "https://www.example.com/",
             "etag": {"supported": True},
             "filter": {"maxResults": 1000, "supported": True},
             "meta": {
@@ -65,7 +75,6 @@ class TestSCIMProvider:
                 "supported": False,
             },
             "changePassword": {"supported": True},
-            "documentationUri": "https://www.example.com/",
             "etag": {"supported": True},
             "filter": {"maxResults": 1000, "supported": True},
             "meta": {
@@ -76,6 +85,36 @@ class TestSCIMProvider:
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
             "sort": {"supported": True},
         }
+
+    def test_service_provider_configuration_from_the_provider(self, backend):
+        """The configuration the provider carries is the one published."""
+        config = ServiceProviderConfig(
+            patch=Patch(supported=False),
+            bulk=Bulk(supported=False),
+            filter=Filter(supported=False),
+            change_password=ChangePassword(supported=False),
+            sort=Sort(supported=False),
+            etag=ETag(supported=False),
+        )
+        provider = ScimProvider(models=[User], config=config)
+        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            published = client.get("/v2/ServiceProviderConfig").json()
+        assert published["patch"] == {"supported": False}
+        assert published["filter"] == {"supported": False}
+
+    def test_service_provider_configuration_defaults(self, backend):
+        """A provider carrying no configuration is served the default one."""
+        provider = ScimProvider(models=[User])
+        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            published = client.get("/v2/ServiceProviderConfig").json()
+        del published["meta"]
+        assert published == load_default_service_provider_config().model_dump()
 
     def test_schemas(self, wsgi):
         r = wsgi.get("/v2/Schemas")
@@ -124,7 +163,12 @@ class TestSCIMProvider:
         j = r.json()
         assert j["schemas"] == ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"]
         assert j["schema"] == "urn:ietf:params:scim:schemas:core:2.0:User"
-        assert len(j["schemaExtensions"]) == 1
+        assert j["schemaExtensions"] == [
+            {
+                "schema": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+                "required": False,
+            }
+        ]
         assert j["meta"]["location"] == "https://scim.example.com/v2/ResourceTypes/User"
 
         # RFC7644, Section 4
@@ -137,6 +181,29 @@ class TestSCIMProvider:
         assert j["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
         assert j["status"] == "404"
         assert "not found" in j["detail"]
+
+    def test_discovery_resources_carry_their_meta(self, wsgi):
+        """Each schema and resource type is published with its type and its location."""
+        base_url = "https://scim.example.com/v2"
+        for endpoint, resource_type in (
+            ("Schemas", "Schema"),
+            ("ResourceTypes", "ResourceType"),
+        ):
+            for resource in wsgi.get(f"/v2/{endpoint}").json()["Resources"]:
+                location = f"{base_url}/{endpoint}/{resource['id']}"
+                assert resource["meta"] == {
+                    "resourceType": resource_type,
+                    "location": location,
+                }
+                single = wsgi.get(f"/v2/{endpoint}/{resource['id']}").json()
+                assert single["meta"] == resource["meta"]
+
+    def test_discovery_location_leaves_out_the_scim_suffix(self, wsgi):
+        """RFC 7644 §3.8: the .scim suffix only selects the format, it is not part of the location."""
+        r = wsgi.get("/v2/ResourceTypes/User.scim")
+        assert r.json()["meta"]["location"] == (
+            "https://scim.example.com/v2/ResourceTypes/User"
+        )
 
     def test_me(self, wsgi):
         r = wsgi.get("/v2/Me")
@@ -319,10 +386,15 @@ class TestSCIMProvider:
         )
         assert r.status_code == 200
         j = r.json()
+        # RFC 7644 §3.5.1 lets the omitted readWrite attributes be cleared.
+        assert "displayName" not in j
+        assert (
+            "organization"
+            not in j["urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"]
+        )
         compare_dicts(
             {
                 "id": first_fake_user,
-                "displayName": "Mx. Larry Hunt",
                 "active": False,
                 "userName": "foo@example.com",
                 "name": {
@@ -331,10 +403,8 @@ class TestSCIMProvider:
                 "phoneNumbers": [
                     {"value": "001-767-633-4744", "type": "home", "primary": True}
                 ],
-                "addresses": [],
                 "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
                     "employeeNumber": "512",
-                    "organization": "Blake PLC",
                 },
             },
             j,
@@ -348,6 +418,7 @@ class TestSCIMProvider:
         r = wsgi.put(
             f"/v2/Users/{first_fake_user}",
             json={
+                "userName": "joseph96@williams-brown.com",
                 "name": None,
                 "phoneNumbers": [],
             },
@@ -356,6 +427,80 @@ class TestSCIMProvider:
         j = r.json()
         assert not j.get("name")
         assert not j.get("phoneNumbers")
+
+    def test_resource_put_requires_the_required_attributes(self, wsgi, first_fake_user):
+        """RFC 7644 §3.5.1: a required attribute MUST be specified in a PUT."""
+        r = wsgi.put(f"/v2/Users/{first_fake_user}", json={"displayName": "Foo"})
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidValue"
+
+    def test_resource_put_clears_an_omitted_extension(self, wsgi, first_fake_user):
+        """An extension left out of the replacement is cleared like any readWrite attribute."""
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                "userName": "joseph96@williams-brown.com",
+            },
+        )
+        assert r.status_code == 200
+        assert (
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User" not in r.json()
+        )
+
+    def test_resource_put_keeps_an_omitted_password(
+        self, app, user_type, wsgi, first_fake_user
+    ):
+        """A client never gets the password back, so omitting it does not clear it."""
+        stored = app.backend.get_resource(user_type, first_fake_user)
+        assert stored.password is not None
+
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={"userName": "joseph96@williams-brown.com"},
+        )
+        assert r.status_code == 200
+        replaced = app.backend.get_resource(user_type, first_fake_user)
+        assert replaced.password == stored.password
+
+    def test_resource_put_clears_a_password_set_to_null(
+        self, app, user_type, wsgi, first_fake_user
+    ):
+        """An explicit null is how RFC 7644 §3.5.1 lets a client clear a value."""
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={"userName": "joseph96@williams-brown.com", "password": None},
+        )
+        assert r.status_code == 200
+        assert app.backend.get_resource(user_type, first_fake_user).password is None
+
+    def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
+        """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""
+        group = {
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+            "displayName": "admins",
+            "members": [{"value": "u1", "type": "User"}],
+        }
+        group_id = wsgi.post("/v2/Groups", json=group).json()["id"]
+
+        group["members"][0]["type"] = "Group"
+        r = wsgi.put(f"/v2/Groups/{group_id}", json=group)
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "mutability"
+
+    def test_resource_put_ignores_read_only_attributes(self, wsgi, first_fake_user):
+        """RFC 7644 §3.5.1: readOnly values provided SHALL be ignored."""
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "userName": "joseph96@williams-brown.com",
+                "id": "another-id",
+                "meta": {"resourceType": "Group"},
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["id"] == first_fake_user
+        assert r.json()["meta"]["resourceType"] == "User"
 
     def test_resource_delete(self, wsgi, first_fake_user):
         r = wsgi.delete(f"/v2/Users/{first_fake_user}")
@@ -603,11 +748,13 @@ class TestSCIMProvider:
         assert len(r.json()["Resources"]) == 1
 
     @pytest.mark.parametrize("payload", [{}, {"count": 10}])
-    def test_search_post_is_capped_to_page_size(
-        self, provider, wsgi, fake_user_data, payload
+    def test_search_post_is_capped_to_max_results(
+        self, wsgi_with, fake_user_data, payload
     ):
-        """A POST search is paginated with the server page size as a GET is."""
-        provider.page_size = 2
+        """A page never holds more than the filter.maxResults the service declares."""
+        config = load_default_service_provider_config()
+        config.filter.max_results = 2
+        wsgi = wsgi_with(config)
         for user in fake_user_data[:3]:
             wsgi.post("/v2/Users", json=user)
         r = wsgi.post(
@@ -622,6 +769,112 @@ class TestSCIMProvider:
         assert r.json()["itemsPerPage"] == 2
         assert r.json()["startIndex"] == 1
         assert len(r.json()["Resources"]) == 2
+
+    def test_search_without_max_results_is_not_paginated(
+        self, wsgi_with, fake_user_data
+    ):
+        """A service declaring no filter.maxResults returns every result when no count is given."""
+        config = load_default_service_provider_config()
+        config.filter = Filter(supported=False)
+        wsgi = wsgi_with(config)
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users")
+        assert r.json()["itemsPerPage"] == 3
+
+    def test_search_without_filter_capabilities_is_not_paginated(
+        self, wsgi_with, fake_user_data
+    ):
+        """A service declaring no filter capabilities returns every result when no count is given."""
+        config = load_default_service_provider_config()
+        config.filter = None
+        wsgi = wsgi_with(config)
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users")
+        assert r.json()["itemsPerPage"] == 3
+
+    def test_search_count_zero_returns_no_resource(self, wsgi, fake_user_data):
+        """RFC 7644 §3.4.2.4: a count of 0 only asks for the total results."""
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users", params={"count": 0})
+        assert r.json()["totalResults"] == 3
+        assert r.json()["itemsPerPage"] == 0
+
+    @pytest.mark.parametrize(
+        "capability,method,url,payload",
+        [
+            ("filter", "GET", '/v2/Users?filter=userName eq "bjensen"', None),
+            (
+                "filter",
+                "POST",
+                "/v2/Users/.search",
+                {"filter": 'userName eq "bjensen"'},
+            ),
+            ("sort", "GET", "/v2/Users?sortBy=userName", None),
+            ("sort", "GET", "/v2/Users?sortOrder=descending", None),
+            ("sort", "POST", "/v2/.search", {"sortBy": "userName"}),
+        ],
+    )
+    def test_search_refuses_an_unsupported_capability(
+        self, wsgi_with, capability, method, url, payload
+    ):
+        """RFC 7644 §3.12: a search using a capability the service does not declare answers 501."""
+        config = load_default_service_provider_config()
+        setattr(config, capability, None)
+        wsgi = wsgi_with(config)
+        if payload is not None:
+            payload["schemas"] = ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        r = wsgi.request(method, url, json=payload)
+        assert r.status_code == 501
+        assert r.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+        assert r.json()["status"] == "501"
+
+    @pytest.mark.parametrize("patch", [None, Patch(supported=False)])
+    def test_patch_refuses_when_unsupported(self, wsgi_with, fake_user_data, patch):
+        """A service declaring no PATCH support answers 501 to a PATCH, before reading its body."""
+        config = load_default_service_provider_config()
+        config.patch = patch
+        wsgi = wsgi_with(config)
+        user_id = wsgi.post("/v2/Users", json=fake_user_data[0]).json()["id"]
+        r = wsgi.patch(f"/v2/Users/{user_id}", json={})
+        assert r.status_code == 501
+
+    def test_patch_path_filters_do_not_require_the_filter_capability(
+        self, wsgi_with, fake_user_data
+    ):
+        """The filter of a PATCH path belongs to PATCH, not to the search filter capability."""
+        config = load_default_service_provider_config()
+        config.filter = Filter(supported=False)
+        wsgi = wsgi_with(config)
+        user_id = wsgi.post("/v2/Users", json=fake_user_data[0]).json()["id"]
+        r = wsgi.patch(
+            f"/v2/Users/{user_id}",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {
+                        "op": "replace",
+                        "path": 'emails[type eq "work"].value',
+                        "value": "new@example.com",
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 204
+
+    def test_bulk_is_not_implemented(self, wsgi):
+        """RFC 7644 §3.7: bulk is optional, and this server answers 501 to it."""
+        r = wsgi.post(
+            "/v2/Bulk",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "Operations": [],
+            },
+        )
+        assert r.status_code == 501
+        assert r.json()["detail"] == "Bulk operations are not supported"
 
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""
@@ -770,10 +1023,10 @@ class TestSCIMProvider:
         assert j["meta"]["created"] == "2024-03-14T06:00:00Z"
         assert j["meta"]["lastModified"] == "2024-03-16T08:30:00Z"
 
-    def test_authentication(self, first_fake_user, provider, wsgi):
+    def test_authentication(self, first_fake_user, app, wsgi):
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert "WWW-Authenticate" not in r.headers
-        provider.register_bearer_token("SuperSecretToken")
+        app.register_bearer_token("SuperSecretToken")
 
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert "WWW-Authenticate" in r.headers

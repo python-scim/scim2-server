@@ -678,7 +678,6 @@
                         "description": "A label indicating the attribute's function.",
                         "required": false,
                         "caseExact": false,
-                        "canonicalValues": [],
                         "mutability": "readWrite",
                         "returned": "default",
                         "uniqueness": "none"
@@ -733,7 +732,6 @@
                         "description": "A label indicating the attribute's function.",
                         "required": false,
                         "caseExact": false,
-                        "canonicalValues": [],
                         "mutability": "readWrite",
                         "returned": "default",
                         "uniqueness": "none"
@@ -751,11 +749,7 @@
                 "mutability": "readWrite",
                 "returned": "default"
             }
-        ],
-        "meta": {
-            "resourceType": "Schema",
-            "location": "/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User"
-        }
+        ]
     },
     {
         "id": "urn:ietf:params:scim:schemas:core:2.0:Group",
@@ -830,11 +824,7 @@
                 "mutability": "readWrite",
                 "returned": "default"
             }
-        ],
-        "meta": {
-            "resourceType": "Schema",
-            "location": "/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:Group"
-        }
+        ]
     },
     {
         "id": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
@@ -941,10 +931,6 @@
                 "mutability": "readWrite",
                 "returned": "default"
             }
-        ],
-        "meta": {
-            "resourceType": "Schema",
-            "location": "/v2/Schemas/urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
-        }
+        ]
     }
 ]

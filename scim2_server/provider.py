@@ -1,17 +1,14 @@
 import itertools
 import json
 import logging
-import traceback
+from typing import Any
 from typing import Union
+from typing import cast
 from urllib.parse import urljoin
 
 from pydantic import ValidationError
-from scim2_models import AuthenticationScheme
-from scim2_models import Bulk
-from scim2_models import ChangePassword
 from scim2_models import Context
 from scim2_models import Error
-from scim2_models import ETag
 from scim2_models import Filter
 from scim2_models import ListResponse
 from scim2_models import Meta
@@ -22,6 +19,7 @@ from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import Schema
 from scim2_models import SCIMException
+from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
@@ -40,7 +38,7 @@ from werkzeug.routing.exceptions import RequestRedirect
 
 from scim2_server.backend import Backend
 from scim2_server.operators import patch_resource
-from scim2_server.utils import merge_resources
+from scim2_server.utils import load_default_service_provider_config
 
 SEARCH_REQUEST_PARAMETERS = (
     "attributes",
@@ -53,16 +51,17 @@ SEARCH_REQUEST_PARAMETERS = (
 )
 
 
-class SCIMProvider:
+class SCIMApplication:
     """A WSGI application implementing a SCIM provider (server)."""
 
-    def __init__(self, backend: Backend):
+    def __init__(self, backend: Backend, provider: ScimProvider):
         self.bearer_tokens = set()
         self.backend = backend
-        self.page_size = 50
-        self.log = logging.getLogger("SCIMProvider")
+        self.provider = provider
+        self.config = provider.config or load_default_service_provider_config()
+        self.log = logging.getLogger("SCIMApplication")
 
-        # Register the URL mapping. The endpoint refers to the name of the function to be called in this SCIMProvider ("call_" + endpoint).
+        # Register the URL mapping. The endpoint refers to the name of the function to be called in this SCIMApplication ("call_" + endpoint).
         rules = itertools.chain.from_iterable(
             [
                 Rule(
@@ -123,93 +122,133 @@ class SCIMProvider:
 
         self.url_map = Map(rules)
 
-    @staticmethod
-    def adjust_location(
-        request: Request, resource: Resource, cp=False
-    ) -> Resource | None:
-        """Adjust the "meta.location" attribute of a resource to match the hostname the client used to access this server. If a static URL is used,.
+    def get_model(self, resource_type: ResourceType) -> type[Resource]:
+        """Return the model of a resource type, its extensions included."""
+        return cast(type[Resource], self.provider.model_for(resource_type))
 
-        :param request: The werkzeug request object
-        :param resource: The resource to modify
-        :param cp: Whether to return a modified copy of the resource or
-            to modify the resource in-place.
+    def get_models(self) -> list[type[Resource]]:
+        """Return the models of every resource type."""
+        return [self.get_model(rt) for rt in self.provider.resource_types]
+
+    def get_resource_type_by_endpoint(self, endpoint: str) -> ResourceType | None:
+        """Return the resource type an endpoint serves."""
+        return next(
+            (
+                resource_type
+                for resource_type in self.provider.resource_types
+                if resource_type.endpoint.lstrip("/").casefold()
+                == endpoint.lstrip("/").casefold()
+            ),
+            None,
+        )
+
+    @property
+    def etag_supported(self) -> bool:
+        """Whether the configuration declares the resources versioned with ETags."""
+        return bool(self.config.etag and self.config.etag.supported)
+
+    def publish(self, request: Request, resource: Resource) -> Resource:
+        """Return a copy of a resource in the form sent to the client.
+
+        Its location is made absolute from the URL the client requested, and
+        its version is left out when the service does not support ETags.
         """
-        location = urljoin(request.url + "/", resource.meta.location)
-        if cp:
-            obj = resource.model_copy(deep=True)
-            obj.meta.location = location
-            return obj
+        update: dict[str, Any] = {
+            "location": urljoin(request.url + "/", resource.meta.location)
+        }
+        if not self.etag_supported:
+            update["version"] = None
+        return resource.model_copy(
+            update={"meta": resource.meta.model_copy(update=update)}
+        )
 
-        resource.meta.location = location
+    @staticmethod
+    def etag_header(resource: Resource) -> dict[str, str]:
+        """Return the ETag header of a published resource, if it has a version."""
+        return {"ETag": resource.meta.version} if resource.meta.version else {}
 
     def apply_patch_operation(self, resource: Resource, patch_operation):
         """Apply a PATCH operation to a resource."""
         for op in patch_operation.operations:
             patch_resource(resource, op)
 
-    @staticmethod
-    def continue_etag(request: Request, resource: Resource) -> bool:
-        """Given a request and a resource, checks whether the ETag matches and allows continuing with the request.
+    def check_preconditions(self, request: Request, resource: Resource) -> bool:
+        """Evaluate the "If-Match" and "If-None-Match" headers against a resource.
 
-        If the HTTP header "If-Match" is set, the request may only
-        continue if the ETag matches. If the HTTP header "If-None-Match"
-        is set, the request may only continue if the ETag does not
-        match.
+        RFC 7232 §6 evaluates "If-Match" first: a failed "If-Match" answers
+        412 whatever the method, a failed "If-None-Match" answers 304 to a GET
+        and 412 otherwise.
+
+        :return: :data:`False` when a GET should answer 304 Not Modified.
+        :raises PreconditionFailed: When the method must not be performed.
         """
-        cont = True
-        resource_version, _ = unquote_etag(resource.meta.version)
-        if request.if_none_match:
-            cont &= not request.if_none_match.contains_weak(resource_version)
-        if request.if_match:
-            cont &= request.if_match.contains_weak(resource_version)
-        return cont
+        # A service that does not support ETags has no tag to match: RFC 7232
+        # §3.1 fails an If-Match listing tags, and lets "*" pass.
+        version, _ = (
+            unquote_etag(resource.meta.version) if self.etag_supported else (None, None)
+        )
+        # RFC 7232 §3.1 compares If-Match strongly, which would never match
+        # the weak ETags RFC 7644 §3.14 recommends and sends in its example.
+        if request.if_match and not request.if_match.contains_weak(version):
+            raise PreconditionFailed
+
+        if request.if_none_match and request.if_none_match.contains_weak(version):
+            if request.method == "GET":
+                return False
+            raise PreconditionFailed
+
+        return True
 
     def call_single_resource(
         self, request: Request, resource_endpoint: str, resource_id: str, **kwargs
     ) -> Response:
-        find_endpoint = "/" + resource_endpoint
-        resource_type = self.backend.get_resource_type_by_endpoint(find_endpoint)
+        resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
             raise NotFound
 
         match request.method:
             case "GET":
-                if resource := self.backend.get_resource(resource_type.id, resource_id):
-                    if self.continue_etag(request, resource):
-                        response_parameters = self.get_response_parameters(
-                            request, self.backend.get_model(resource_type.id)
-                        )
-                        self.adjust_location(request, resource)
-                        return self.make_response(
-                            resource.model_dump(
-                                scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
-                                response_parameters=response_parameters,
-                            )
-                        )
-                    else:
-                        return self.make_response(None, status=304)
-                raise NotFound
-            case "DELETE":
-                if self.backend.delete_resource(resource_type.id, resource_id):
-                    return self.make_response(None, 204)
-                else:
-                    raise NotFound
-            case "PUT":
-                response_parameters = self.get_response_parameters(
-                    request, self.backend.get_model(resource_type.id)
-                )
-                resource = self.backend.get_resource(resource_type.id, resource_id)
+                resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
-                if not self.continue_etag(request, resource):
-                    raise PreconditionFailed
+                resource = self.publish(request, resource)
+                if not self.check_preconditions(request, resource):
+                    # RFC 7232 §4.1: a 304 carries the ETag a 200 would have
+                    return self.make_response(
+                        None, status=304, headers=self.etag_header(resource)
+                    )
 
-                updated_attributes = self.backend.get_model(
-                    resource_type.id
-                ).model_validate(request.json)
-                merge_resources(resource, updated_attributes)
-                updated = self.backend.update_resource(resource_type.id, resource)
-                self.adjust_location(request, updated)
+                response_parameters = self.get_response_parameters(
+                    request, self.get_model(resource_type)
+                )
+                return self.make_response(
+                    resource.model_dump(
+                        scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
+                        response_parameters=response_parameters,
+                    )
+                )
+            case "DELETE":
+                resource = self.backend.get_resource(resource_type, resource_id)
+                if resource is None:
+                    raise NotFound
+                self.check_preconditions(request, resource)
+                self.backend.delete_resource(resource_type, resource_id)
+                return self.make_response(None, 204)
+            case "PUT":
+                response_parameters = self.get_response_parameters(
+                    request, self.get_model(resource_type)
+                )
+                resource = self.backend.get_resource(resource_type, resource_id)
+                if resource is None:
+                    raise NotFound
+                self.check_preconditions(request, resource)
+
+                replacement = self.get_model(resource_type).model_validate(
+                    request.json, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
+                )
+                replacement.replace(resource)
+                updated = self.backend.update_resource(resource_type, replacement)
+                updated = self.publish(request, updated)
                 return self.make_response(
                     updated.model_dump(
                         scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
@@ -217,6 +256,7 @@ class SCIMProvider:
                     )
                 )
             case _:  # "PATCH"
+                self.ensure_supported(self.config.patch, "PATCH")
                 payload = request.json
                 # MS Entra sometimes passes a "id" attribute
                 if "id" in payload:
@@ -227,25 +267,24 @@ class SCIMProvider:
                         # MS Entra sometimes passes a "name" attribute
                         del operation["name"]
 
-                ResourceModel = self.backend.get_model(resource_type.id)
+                ResourceModel = self.get_model(resource_type)
                 patch_operation = PatchOp[ResourceModel].model_validate(payload)
                 response_parameters = self.get_response_parameters(
                     request, ResourceModel
                 )
-                resource = self.backend.get_resource(resource_type.id, resource_id)
+                resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
-                if not self.continue_etag(request, resource):
-                    raise PreconditionFailed
+                self.check_preconditions(request, resource)
 
                 self.apply_patch_operation(resource, patch_operation)
-                updated = self.backend.update_resource(resource_type.id, resource)
+                updated = self.backend.update_resource(resource_type, resource)
 
                 if (
                     response_parameters.attributes
                     or response_parameters.excluded_attributes
                 ):
-                    self.adjust_location(request, updated)
+                    updated = self.publish(request, updated)
                     return self.make_response(
                         updated.model_dump(
                             scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
@@ -257,7 +296,9 @@ class SCIMProvider:
                     # A PATCH operation MAY return a 204 (no content)
                     # if no attributes were requested
                     return self.make_response(
-                        None, 204, headers={"ETag": updated.meta.version}
+                        None,
+                        204,
+                        headers=self.etag_header(self.publish(request, updated)),
                     )
 
     @staticmethod
@@ -291,33 +332,35 @@ class SCIMProvider:
                 for key in SEARCH_REQUEST_PARAMETERS
                 if key in request.args
             }
+
+        # The filters of PATCH paths are part of the PATCH capability: the
+        # filter capability of RFC 7643 §5 refers to the search parameter of
+        # RFC 7644 §3.4.2.2 only.
+        parameters = {key.casefold() for key in payload}
+        if "filter" in parameters:
+            self.ensure_supported(self.config.filter, "Filtering")
+        if parameters & {"sortby", "sortorder"}:
+            self.ensure_supported(self.config.sort, "Sorting")
+
         search_request = SearchRequest[Union[tuple(models)]].model_validate(  # noqa: UP007
             payload, scim_ctx=Context.SEARCH_REQUEST
         )
         search_request.start_index = search_request.start_index or 1
-        search_request.count = (
-            self.page_size
-            if search_request.count is None
-            else min(search_request.count, self.page_size)
-        )
+        max_results = self.config.filter.max_results if self.config.filter else None
+        if max_results is not None and (
+            search_request.count is None or search_request.count > max_results
+        ):
+            search_request.count = max_results
         return search_request
 
     def query_resource(self, request: Request, resource: ResourceType | None):
-        models = (
-            list(self.backend.get_models())
-            if resource is None
-            else [self.backend.get_model(resource.id)]
-        )
+        models = self.get_models() if resource is None else [self.get_model(resource)]
         search_request = self.build_search_request(request, models)
 
-        kwargs = {}
-        if resource is not None:
-            kwargs["resource_type_id"] = resource.id
         total_results, results = self.backend.query_resources(
-            search_request=search_request, **kwargs
+            search_request=search_request, resource_type=resource
         )
-        for r in results:
-            self.adjust_location(request, r)
+        results = [self.publish(request, r) for r in results]
 
         resources = [
             s.model_dump(
@@ -327,7 +370,7 @@ class SCIMProvider:
             for s in results
         ]
 
-        return ListResponse[Union[tuple(self.backend.get_models())]](  # noqa: UP007
+        return ListResponse[Union[tuple(self.get_models())]](  # noqa: UP007
             total_results=total_results,
             items_per_page=len(resources),
             start_index=search_request.start_index,
@@ -337,9 +380,7 @@ class SCIMProvider:
     def call_resource(
         self, request: Request, resource_endpoint: str, **kwargs
     ) -> Response:
-        resource_type = self.backend.get_resource_type_by_endpoint(
-            "/" + resource_endpoint
-        )
+        resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
             raise NotFound
 
@@ -352,14 +393,11 @@ class SCIMProvider:
                 )
             case _:  # "POST"
                 payload = request.json
-                resource = self.backend.get_model(resource_type.id).model_validate(
+                resource = self.get_model(resource_type).model_validate(
                     payload, scim_ctx=Context.RESOURCE_CREATION_REQUEST
                 )
-                created_resource = self.backend.create_resource(
-                    resource_type.id,
-                    resource,
-                )
-                self.adjust_location(request, created_resource)
+                created_resource = self.backend.create_resource(resource_type, resource)
+                created_resource = self.publish(request, created_resource)
                 return self.make_response(
                     created_resource.model_dump(
                         scim_ctx=Context.RESOURCE_CREATION_RESPONSE
@@ -378,9 +416,7 @@ class SCIMProvider:
     def call_resource_search(
         self, request: Request, resource_endpoint: str, **kwargs
     ) -> Response:
-        resource_type = self.backend.get_resource_type_by_endpoint(
-            "/" + resource_endpoint
-        )
+        resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
             raise NotFound
         return self.make_response(
@@ -389,6 +425,20 @@ class SCIMProvider:
             )
         )
 
+    @staticmethod
+    def ensure_supported(capability: Patch | Filter | Sort | None, operation: str):
+        """Refuse with a 501 an operation the configuration does not declare supported.
+
+        RFC 7644 §3.12 answers 501 when the service provider does not support
+        the request operation.
+        """
+        if capability is None or not capability.supported:
+            raise WerkzeugNotImplemented(f"{operation} is not supported")
+
+    def call_bulk(self, request: Request, **kwargs):
+        """Implement the /Bulk endpoint, which this server does not support."""
+        raise WerkzeugNotImplemented("Bulk operations are not supported")
+
     def call_me(self, request: Request, **kwargs):
         """Implement the /Me endpoint.
 
@@ -396,12 +446,6 @@ class SCIMProvider:
         the endpoint does not provide this feature.
         """
         raise WerkzeugNotImplemented
-
-    def register_schema(self, schema: Schema):
-        self.backend.register_schema(schema)
-
-    def register_resource_type(self, resource_type: ResourceType):
-        self.backend.register_resource_type(resource_type)
 
     def register_bearer_token(self, token: str):
         """Register a static bearer token for authentication.
@@ -449,89 +493,65 @@ class SCIMProvider:
         if "filter" in request.args:
             raise Forbidden
 
-    def get_service_provider_config(self):
-        """Build a ServiceProviderConfig object describing the server configuration."""
-        auth_scheme = (
-            []
-            if not self.bearer_tokens
-            else [
-                AuthenticationScheme(
-                    type="oauthbearertoken",
-                    name="bearer_token",
-                    description="HTTP Bearer Token",
-                    spec_uri="https://datatracker.ietf.org/doc/html/rfc6750",
-                )
-            ]
-        )
-        return ServiceProviderConfig(
-            documentation_uri="https://www.example.com/",
-            patch=Patch(supported=True),
-            bulk=Bulk(supported=False),
-            filter=Filter(supported=True, max_results=1000),
-            change_password=ChangePassword(supported=True),
-            sort=Sort(supported=True),
-            etag=ETag(supported=True),
-            authentication_schemes=auth_scheme,
-            meta=Meta(
-                resource_type="ServiceProviderConfig",
-            ),
-        )
-
     def call_service_provider_config(self, request: Request, **kwargs):
         """Return the ServiceProviderConfig."""
         self.forbid_filter(request)
-        spc = self.get_service_provider_config()
-        spc.meta.location = request.url
-        return self.make_response(spc.model_dump())
+        return self.make_response(
+            self.locate(self.config, request.base_url).model_dump()
+        )
+
+    @staticmethod
+    def locate(resource: ResourceType | Schema | ServiceProviderConfig, location: str):
+        """Return a copy of a discovery resource carrying its meta."""
+        meta = Meta(resource_type=type(resource).__name__, location=location)
+        return resource.model_copy(update={"meta": meta})
 
     def call_resource_type(self, request: Request, resource_type: str, **kwargs):
         """Return a single resource type."""
         self.forbid_filter(request)
-        if res := self.backend.get_resource_type(resource_type):
-            cp = res.model_copy(deep=True)
-            cp.meta.location = request.url
-            return self.make_response(cp.model_dump())
+        for res in self.provider.resource_types:
+            if res.id == resource_type:
+                return self.make_response(
+                    self.locate(res, request.base_url).model_dump()
+                )
         raise NotFound
 
     def call_schema(self, request: Request, schema_id: str):
         """Return a single schema."""
         self.forbid_filter(request)
-        if res := self.backend.get_schema(schema_id):
-            cp = res.model_copy(deep=True)
-            cp.meta.location = request.url
-            return self.make_response(cp.model_dump())
+        for res in self.provider.schemas:
+            if res.id == schema_id:
+                return self.make_response(
+                    self.locate(res, request.base_url).model_dump()
+                )
         raise NotFound
 
     def call_resource_types(self, request: Request, **kwargs):
         """Return a ListResponse of all known resource types."""
         self.forbid_filter(request)
-        results = self.backend.get_resource_types()
+        results = self.provider.resource_types
         resp = ListResponse[ResourceType](
             total_results=len(results),
             items_per_page=len(results),
             start_index=1,
-            resources=[self.adjust_location(request, s, True) for s in results],
+            resources=[self.locate(s, f"{request.base_url}/{s.id}") for s in results],
         ).model_dump()
         return self.make_response(resp)
 
     def call_schemas(self, request: Request, **kwargs):
         """Return a ListResponse of all known schemas."""
         self.forbid_filter(request)
-        results = self.backend.get_schemas()
+        results = self.provider.schemas
         resp = ListResponse[Schema](
             total_results=len(results),
             items_per_page=len(results),
             start_index=1,
-            resources=[self.adjust_location(request, s, True) for s in results],
+            resources=[self.locate(s, f"{request.base_url}/{s.id}") for s in results],
         ).model_dump()
         return self.make_response(resp)
 
     def wsgi_app(self, request: Request, environ):
         try:
-            if environ.get("PATH_INFO", "").endswith(".scim"):
-                # RFC 7644, Section 3.8
-                # Just strip .scim suffix, the provider always returns application/scim+json
-                environ["PATH_INFO"], _, _ = environ["PATH_INFO"].rpartition(".scim")
             urls = self.url_map.bind_to_environ(environ)
             endpoint, args = urls.match()
 
@@ -558,11 +578,14 @@ class SCIMProvider:
             return self.make_error(Error.from_validation_errors(e)[0])
         except Exception as e:
             self.log.exception(e)
-            tb = traceback.format_exc()
-            return self.make_error(Error(status=500, detail=str(e) + "\n" + tb))
+            return self.make_error(Error(status=500, detail="Internal server error"))
 
     def __call__(self, environ, start_response):
         """Return the actual WSGI server implementation."""
+        if environ.get("PATH_INFO", "").endswith(".scim"):
+            # RFC 7644, Section 3.8
+            # Just strip .scim suffix, the provider always returns application/scim+json
+            environ["PATH_INFO"], _, _ = environ["PATH_INFO"].rpartition(".scim")
         request = Request(environ)
         response = self.wsgi_app(request, environ)
         if "Location" not in response.headers:
