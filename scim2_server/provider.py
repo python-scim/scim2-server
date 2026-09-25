@@ -19,6 +19,7 @@ from scim2_models import Patch
 from scim2_models import PatchOp
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import Schema
 from scim2_models import SCIMException
 from scim2_models import SearchRequest
@@ -26,7 +27,6 @@ from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
 from werkzeug import Request
 from werkzeug import Response
-from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import Forbidden
 from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import NotFound
@@ -166,12 +166,14 @@ class SCIMProvider:
             case "GET":
                 if resource := self.backend.get_resource(resource_type.id, resource_id):
                     if self.continue_etag(request, resource):
-                        response_args = self.get_attrs_from_request(request)
+                        response_parameters = self.get_response_parameters(
+                            request, self.backend.get_model(resource_type.id)
+                        )
                         self.adjust_location(request, resource)
                         return self.make_response(
                             resource.model_dump(
                                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
-                                **response_args,
+                                response_parameters=response_parameters,
                             )
                         )
                     else:
@@ -183,7 +185,9 @@ class SCIMProvider:
                 else:
                     raise NotFound
             case "PUT":
-                response_args = self.get_attrs_from_request(request)
+                response_parameters = self.get_response_parameters(
+                    request, self.backend.get_model(resource_type.id)
+                )
                 resource = self.backend.get_resource(resource_type.id, resource_id)
                 if resource is None:
                     raise NotFound
@@ -199,7 +203,7 @@ class SCIMProvider:
                 return self.make_response(
                     updated.model_dump(
                         scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
-                        **response_args,
+                        response_parameters=response_parameters,
                     )
                 )
             case _:  # "PATCH"
@@ -215,7 +219,9 @@ class SCIMProvider:
 
                 ResourceModel = self.backend.get_model(resource_type.id)
                 patch_operation = PatchOp[ResourceModel].model_validate(payload)
-                response_args = self.get_attrs_from_request(request)
+                response_parameters = self.get_response_parameters(
+                    request, ResourceModel
+                )
                 resource = self.backend.get_resource(resource_type.id, resource_id)
                 if resource is None:
                     raise NotFound
@@ -225,12 +231,15 @@ class SCIMProvider:
                 self.apply_patch_operation(resource, patch_operation)
                 updated = self.backend.update_resource(resource_type.id, resource)
 
-                if response_args:
+                if (
+                    response_parameters.attributes
+                    or response_parameters.excluded_attributes
+                ):
                     self.adjust_location(request, updated)
                     return self.make_response(
                         updated.model_dump(
                             scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
-                            **response_args,
+                            response_parameters=response_parameters,
                         )
                     )
                 else:
@@ -242,22 +251,17 @@ class SCIMProvider:
                     )
 
     @staticmethod
-    def get_attrs_from_request(request: Request) -> dict:
-        """Parse the "attributes" an "excludedAttributes" HTTP request parameters."""
-        ret = {}
-        if "attributes" in request.args:
-            ret["attributes"] = [
-                a.strip() for a in request.args["attributes"].split(",")
-            ]
-        if "excludedAttributes" in request.args:
-            ret["excluded_attributes"] = [
-                a.strip() for a in request.args["excludedAttributes"].split(",")
-            ]
-        if "attributes" in ret and "excluded_attributes" in ret:
-            # RFC 7644, Section 3.9
-            # attributes and excludedAttributes are mutually exclusive
-            raise BadRequest
-        return ret
+    def get_response_parameters(
+        request: Request, model: type[Resource]
+    ) -> ResponseParameters:
+        """Parse the "attributes" and "excludedAttributes" HTTP request parameters."""
+        return ResponseParameters[model].model_validate(
+            {
+                key: request.args[key]
+                for key in ("attributes", "excludedAttributes")
+                if key in request.args
+            }
+        )
 
     def build_search_request(self, request: Request) -> SearchRequest:
         """Construct a SearchRequest object from a werkzeug request.
@@ -306,8 +310,7 @@ class SCIMProvider:
         resources = [
             s.model_dump(
                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
-                attributes=search_request.attributes,
-                excluded_attributes=search_request.excluded_attributes,
+                response_parameters=search_request,
             )
             for s in results
         ]

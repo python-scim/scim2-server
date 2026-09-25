@@ -465,6 +465,54 @@ class TestSCIMProvider:
             "nickName": "Larr",
         }
 
+    def test_resource_patch_request_excluded_attributes(self, wsgi, first_fake_user):
+        """A PATCH with only excludedAttributes returns the resource without them."""
+        r = wsgi.patch(
+            f"/v2/Users/{first_fake_user}",
+            params={"excludedAttributes": "nickName"},
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {
+                        "op": "add",
+                        "value": {
+                            "nickName": "Larr",
+                        },
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["id"] == first_fake_user
+        assert "nickName" not in r.json()
+        assert "userName" in r.json()
+
+    def test_resource_get_unknown_attribute_is_ignored(self, wsgi, first_fake_user):
+        """An unknown attribute in attributes is ignored and the minimum set is returned."""
+        r = wsgi.get(
+            f"/v2/Users/{first_fake_user}",
+            params={"attributes": "unknownAttribute"},
+        )
+        assert r.status_code == 200
+        assert r.json() == {
+            "schemas": [
+                "urn:ietf:params:scim:schemas:core:2.0:User",
+                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+            ],
+            "id": first_fake_user,
+        }
+
+    def test_resource_get_ignores_unrelated_query_parameters(
+        self, wsgi, first_fake_user
+    ):
+        """Query parameters other than attributes and excludedAttributes are not read as attributes."""
+        r = wsgi.get(
+            f"/v2/Users/{first_fake_user}",
+            params={"attributes": "userName", "foo": "bar"},
+        )
+        assert r.status_code == 200
+        assert set(r.json()) == {"schemas", "id", "userName"}
+
     def test_resource_patch_non_existing(self, wsgi):
         r = wsgi.patch(
             "/v2/Users/123",

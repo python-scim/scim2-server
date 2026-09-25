@@ -13,6 +13,7 @@ from scim2_models import MutabilityException
 from scim2_models import Name
 from scim2_models import NoTargetException
 from scim2_models import Resource
+from scim2_models import ResponseParameters
 from scim2_models import SensitiveException
 from scim2_models import User
 
@@ -41,13 +42,15 @@ class TestUtils:
 
         u.model_dump(
             scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
-            attributes=[
-                "displayname",
-                "urn:IETF:params:scim:schemas:core:2.0:User:userName",
-                "urn:IETF:params:scim:schemas:core:2.0:User:name.FORMATTED",
-                "acTIVe",
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:Employeenumber",
-            ],
+            response_parameters=ResponseParameters(
+                attributes=[
+                    "displayname",
+                    "urn:IETF:params:scim:schemas:core:2.0:User:userName",
+                    "urn:IETF:params:scim:schemas:core:2.0:User:name.FORMATTED",
+                    "acTIVe",
+                    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:Employeenumber",
+                ]
+            ),
         )
 
     def test_match_filter(self, provider):
@@ -331,7 +334,8 @@ class TestUtils:
             }
         )
         assert user.model_dump(
-            scim_ctx=Context.RESOURCE_CREATION_RESPONSE, attributes=["userName"]
+            scim_ctx=Context.RESOURCE_CREATION_RESPONSE,
+            response_parameters=ResponseParameters(attributes=["userName"]),
         ) == {
             "schemas": [
                 "urn:ietf:params:scim:schemas:core:2.0:User",
@@ -341,10 +345,12 @@ class TestUtils:
         }
         assert user.model_dump(
             scim_ctx=Context.RESOURCE_CREATION_RESPONSE,
-            attributes=[
-                "userName",
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber",
-            ],
+            response_parameters=ResponseParameters(
+                attributes=[
+                    "userName",
+                    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber",
+                ]
+            ),
         ) == {
             "schemas": [
                 "urn:ietf:params:scim:schemas:core:2.0:User",
