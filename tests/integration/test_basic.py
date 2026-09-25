@@ -1,5 +1,6 @@
 from typing import Union
 
+import pytest
 from scim2_models import ListResponse
 from scim2_models import PatchOp
 from scim2_models import PatchOperation
@@ -173,10 +174,17 @@ class TestSCIMProviderBasic:
 
         assert_sorted("emails", [u2_id, u1_id])
         assert_sorted("emails.value", [u2_id, u1_id])
-        assert_sorted('emails[value ew "example.com"]', [u2_id, u1_id])
-        assert_sorted('emails[value ew "example.com"].value', [u2_id, u1_id])
         assert_sorted(
             "active",
             [u1_id, u2_id],
         )
         assert_sorted("displayName", [group_id, u1_id, u2_id], "/v2/")
+
+    @pytest.mark.parametrize(
+        "sort_by",
+        ['emails[value ew "example.com"]', 'emails[value ew "example.com"].value'],
+    )
+    def test_sort_by_value_filter_is_refused(self, wsgi, sort_by):
+        """RFC 7644 §3.4.2.3 requires sortBy in the attribute notation of §3.10."""
+        result = wsgi.get("/v2/Users", params={"sortBy": sort_by})
+        assert result.status_code == 400
