@@ -25,7 +25,7 @@ class TestProvider:
         assert ret.id is not None
 
     def test_generic_exception_handling(self, app):
-        """Test that generic exceptions are properly handled and return 500 status."""
+        """An unexpected error answers 500 without disclosing its message or traceback."""
         from werkzeug import Request
 
         # Create a mock WSGI environ
@@ -49,6 +49,5 @@ class TestProvider:
 
             # Should return a Response object with status 500
             assert response.status_code == 500
-            # The response should contain error details
-            response_data = response.get_data(as_text=True)
-            assert "Test error" in response_data
+            assert response.json["detail"] == "Internal server error"
+            assert "Traceback" not in response.get_data(as_text=True)

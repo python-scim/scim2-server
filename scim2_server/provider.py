@@ -1,7 +1,6 @@
 import itertools
 import json
 import logging
-import traceback
 from typing import Any
 from typing import Union
 from typing import cast
@@ -579,8 +578,7 @@ class SCIMApplication:
             return self.make_error(Error.from_validation_errors(e)[0])
         except Exception as e:
             self.log.exception(e)
-            tb = traceback.format_exc()
-            return self.make_error(Error(status=500, detail=str(e) + "\n" + tb))
+            return self.make_error(Error(status=500, detail="Internal server error"))
 
     def __call__(self, environ, start_response):
         """Return the actual WSGI server implementation."""
