@@ -16,9 +16,10 @@ from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import ScimProvider
+from scim2_models import ServiceProviderConfig
 
 
-def load_json_resource(json_name: str) -> list:
+def load_json_resource(json_name: str) -> Any:
     """Load a JSON document from the scim2_server package resources."""
     fp = importlib.resources.files("scim2_server") / "resources" / json_name
     with open(fp) as f:
@@ -45,10 +46,19 @@ def load_default_resource_types() -> dict[str, ResourceType]:
     return load_scim_resource("default-resource-types.json", ResourceType)
 
 
+def load_default_service_provider_config() -> ServiceProviderConfig:
+    """Load the default service provider configuration."""
+    return ServiceProviderConfig.model_validate(
+        load_json_resource("default-service-provider-config.json")
+    )
+
+
 def load_default_provider() -> ScimProvider:
-    """Describe a service serving the default schemas and resource types."""
+    """Describe a service serving the default schemas, resource types and configuration."""
     return ScimProvider.from_discovery(
-        load_default_schemas().values(), load_default_resource_types().values()
+        load_default_schemas().values(),
+        load_default_resource_types().values(),
+        config=load_default_service_provider_config(),
     )
 
 

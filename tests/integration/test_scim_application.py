@@ -3,8 +3,19 @@ import datetime
 import httpx2
 import pytest
 import time_machine
+from scim2_models import Bulk
+from scim2_models import ChangePassword
+from scim2_models import ETag
+from scim2_models import Filter
+from scim2_models import Patch
+from scim2_models import ScimProvider
 from scim2_models import SearchRequest
+from scim2_models import ServiceProviderConfig
+from scim2_models import Sort
+from scim2_models import User
 
+from scim2_server.provider import SCIMApplication
+from scim2_server.utils import load_default_service_provider_config
 from tests.utils import compare_dicts
 
 
@@ -42,7 +53,6 @@ class TestSCIMApplication:
                 "supported": False,
             },
             "changePassword": {"supported": True},
-            "documentationUri": "https://www.example.com/",
             "etag": {"supported": True},
             "filter": {"maxResults": 1000, "supported": True},
             "meta": {
@@ -65,7 +75,6 @@ class TestSCIMApplication:
                 "supported": False,
             },
             "changePassword": {"supported": True},
-            "documentationUri": "https://www.example.com/",
             "etag": {"supported": True},
             "filter": {"maxResults": 1000, "supported": True},
             "meta": {
@@ -76,6 +85,36 @@ class TestSCIMApplication:
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
             "sort": {"supported": True},
         }
+
+    def test_service_provider_configuration_from_the_provider(self, backend):
+        """The configuration the provider carries is the one published."""
+        config = ServiceProviderConfig(
+            patch=Patch(supported=False),
+            bulk=Bulk(supported=False),
+            filter=Filter(supported=False),
+            change_password=ChangePassword(supported=False),
+            sort=Sort(supported=False),
+            etag=ETag(supported=False),
+        )
+        provider = ScimProvider(models=[User], config=config)
+        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            published = client.get("/v2/ServiceProviderConfig").json()
+        assert published["patch"] == {"supported": False}
+        assert published["filter"] == {"supported": False}
+
+    def test_service_provider_configuration_defaults(self, backend):
+        """A provider carrying no configuration is served the default one."""
+        provider = ScimProvider(models=[User])
+        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            published = client.get("/v2/ServiceProviderConfig").json()
+        del published["meta"]
+        assert published == load_default_service_provider_config().model_dump()
 
     def test_schemas(self, wsgi):
         r = wsgi.get("/v2/Schemas")

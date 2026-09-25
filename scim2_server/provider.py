@@ -7,16 +7,10 @@ from typing import cast
 from urllib.parse import urljoin
 
 from pydantic import ValidationError
-from scim2_models import AuthenticationScheme
-from scim2_models import Bulk
-from scim2_models import ChangePassword
 from scim2_models import Context
 from scim2_models import Error
-from scim2_models import ETag
-from scim2_models import Filter
 from scim2_models import ListResponse
 from scim2_models import Meta
-from scim2_models import Patch
 from scim2_models import PatchOp
 from scim2_models import Resource
 from scim2_models import ResourceType
@@ -26,7 +20,6 @@ from scim2_models import SCIMException
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
-from scim2_models import Sort
 from werkzeug import Request
 from werkzeug import Response
 from werkzeug.exceptions import Forbidden
@@ -42,6 +35,7 @@ from werkzeug.routing.exceptions import RequestRedirect
 
 from scim2_server.backend import Backend
 from scim2_server.operators import patch_resource
+from scim2_server.utils import load_default_service_provider_config
 
 SEARCH_REQUEST_PARAMETERS = (
     "attributes",
@@ -61,6 +55,7 @@ class SCIMApplication:
         self.bearer_tokens = set()
         self.backend = backend
         self.provider = provider
+        self.config = provider.config or load_default_service_provider_config()
         self.page_size = 50
         self.log = logging.getLogger("SCIMApplication")
 
@@ -436,43 +431,15 @@ class SCIMApplication:
         if "filter" in request.args:
             raise Forbidden
 
-    def get_service_provider_config(self):
-        """Build a ServiceProviderConfig object describing the server configuration."""
-        auth_scheme = (
-            []
-            if not self.bearer_tokens
-            else [
-                AuthenticationScheme(
-                    type="oauthbearertoken",
-                    name="bearer_token",
-                    description="HTTP Bearer Token",
-                    spec_uri="https://datatracker.ietf.org/doc/html/rfc6750",
-                )
-            ]
-        )
-        return ServiceProviderConfig(
-            documentation_uri="https://www.example.com/",
-            patch=Patch(supported=True),
-            bulk=Bulk(supported=False),
-            filter=Filter(supported=True, max_results=1000),
-            change_password=ChangePassword(supported=True),
-            sort=Sort(supported=True),
-            etag=ETag(supported=True),
-            authentication_schemes=auth_scheme,
-            meta=Meta(
-                resource_type="ServiceProviderConfig",
-            ),
-        )
-
     def call_service_provider_config(self, request: Request, **kwargs):
         """Return the ServiceProviderConfig."""
         self.forbid_filter(request)
-        spc = self.get_service_provider_config()
-        spc.meta.location = request.url
-        return self.make_response(spc.model_dump())
+        return self.make_response(
+            self.locate(self.config, request.base_url).model_dump()
+        )
 
     @staticmethod
-    def locate(resource: ResourceType | Schema, location: str):
+    def locate(resource: ResourceType | Schema | ServiceProviderConfig, location: str):
         """Return a copy of a discovery resource carrying its meta."""
         meta = Meta(resource_type=type(resource).__name__, location=location)
         return resource.model_copy(update={"meta": meta})

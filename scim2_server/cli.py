@@ -3,15 +3,25 @@ import json
 import logging
 import pprint
 
+from scim2_models import AuthenticationScheme
 from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import ScimProvider
+from scim2_models import ServiceProviderConfig
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scim2_server.backend import InMemoryBackend
 from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
+from scim2_server.utils import load_default_service_provider_config
+
+BEARER_TOKEN_SCHEME = AuthenticationScheme(
+    type="oauthbearertoken",
+    name="bearer_token",
+    description="HTTP Bearer Token",
+    spec_uri="https://datatracker.ietf.org/doc/html/rfc6750",
+)
 
 
 def log_environ(handler):
@@ -31,6 +41,11 @@ def main():
     )
     parser.add_argument(
         "--resource-type", type=argparse.FileType("r"), help="Resource Type definitions"
+    )
+    parser.add_argument(
+        "--service-provider-config",
+        type=argparse.FileType("r"),
+        help="Service provider configuration",
     )
     parser.add_argument("--bearer-token", action="append", help="Add Bearer Token")
     parser.add_argument("--hostname", default="127.0.0.1", help="Hostname")
@@ -70,8 +85,24 @@ def main():
                 ResourceType.model_validate(rt) for rt in json.load(args.resource_type)
             ]
 
+    if args.service_provider_config is None:
+        config = load_default_service_provider_config()
+    else:
+        with args.service_provider_config:
+            config = ServiceProviderConfig.model_validate(
+                json.load(args.service_provider_config)
+            )
+
+    if args.bearer_token is not None:
+        config.authentication_schemes = [
+            *(config.authentication_schemes or []),
+            BEARER_TOKEN_SCHEME,
+        ]
+
     backend = InMemoryBackend()
-    app = SCIMApplication(backend, ScimProvider.from_discovery(schemas, resource_types))
+    app = SCIMApplication(
+        backend, ScimProvider.from_discovery(schemas, resource_types, config=config)
+    )
 
     if args.bearer_token is not None:
         for bearer_token in args.bearer_token:

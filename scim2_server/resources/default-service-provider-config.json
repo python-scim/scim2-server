@@ -1,0 +1,25 @@
+{
+    "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+    ],
+    "patch": {
+        "supported": true
+    },
+    "bulk": {
+        "supported": false
+    },
+    "filter": {
+        "supported": true,
+        "maxResults": 1000
+    },
+    "changePassword": {
+        "supported": true
+    },
+    "sort": {
+        "supported": true
+    },
+    "etag": {
+        "supported": true
+    },
+    "authenticationSchemes": []
+}
