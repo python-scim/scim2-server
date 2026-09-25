@@ -153,21 +153,28 @@ class SCIMApplication:
             patch_resource(resource, op)
 
     @staticmethod
-    def continue_etag(request: Request, resource: Resource) -> bool:
-        """Given a request and a resource, checks whether the ETag matches and allows continuing with the request.
+    def check_preconditions(request: Request, resource: Resource) -> bool:
+        """Evaluate the "If-Match" and "If-None-Match" headers against a resource.
 
-        If the HTTP header "If-Match" is set, the request may only
-        continue if the ETag matches. If the HTTP header "If-None-Match"
-        is set, the request may only continue if the ETag does not
-        match.
+        RFC 7232 §6 evaluates "If-Match" first: a failed "If-Match" answers
+        412 whatever the method, a failed "If-None-Match" answers 304 to a GET
+        and 412 otherwise.
+
+        :return: :data:`False` when a GET should answer 304 Not Modified.
+        :raises PreconditionFailed: When the method must not be performed.
         """
-        cont = True
-        resource_version, _ = unquote_etag(resource.meta.version)
-        if request.if_none_match:
-            cont &= not request.if_none_match.contains_weak(resource_version)
-        if request.if_match:
-            cont &= request.if_match.contains_weak(resource_version)
-        return cont
+        version, _ = unquote_etag(resource.meta.version)
+        # RFC 7232 §3.1 compares If-Match strongly, which would never match
+        # the weak ETags RFC 7644 §3.14 recommends and sends in its example.
+        if request.if_match and not request.if_match.contains_weak(version):
+            raise PreconditionFailed
+
+        if request.if_none_match and request.if_none_match.contains_weak(version):
+            if request.method == "GET":
+                return False
+            raise PreconditionFailed
+
+        return True
 
     def call_single_resource(
         self, request: Request, resource_endpoint: str, resource_id: str, **kwargs
@@ -178,26 +185,32 @@ class SCIMApplication:
 
         match request.method:
             case "GET":
-                if resource := self.backend.get_resource(resource_type, resource_id):
-                    if self.continue_etag(request, resource):
-                        response_parameters = self.get_response_parameters(
-                            request, self.get_model(resource_type)
-                        )
-                        self.adjust_location(request, resource)
-                        return self.make_response(
-                            resource.model_dump(
-                                scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
-                                response_parameters=response_parameters,
-                            )
-                        )
-                    else:
-                        return self.make_response(None, status=304)
-                raise NotFound
-            case "DELETE":
-                if self.backend.delete_resource(resource_type, resource_id):
-                    return self.make_response(None, 204)
-                else:
+                resource = self.backend.get_resource(resource_type, resource_id)
+                if resource is None:
                     raise NotFound
+                if not self.check_preconditions(request, resource):
+                    # RFC 7232 §4.1: a 304 carries the ETag a 200 would have
+                    return self.make_response(
+                        None, status=304, headers={"ETag": resource.meta.version}
+                    )
+
+                response_parameters = self.get_response_parameters(
+                    request, self.get_model(resource_type)
+                )
+                self.adjust_location(request, resource)
+                return self.make_response(
+                    resource.model_dump(
+                        scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
+                        response_parameters=response_parameters,
+                    )
+                )
+            case "DELETE":
+                resource = self.backend.get_resource(resource_type, resource_id)
+                if resource is None:
+                    raise NotFound
+                self.check_preconditions(request, resource)
+                self.backend.delete_resource(resource_type, resource_id)
+                return self.make_response(None, 204)
             case "PUT":
                 response_parameters = self.get_response_parameters(
                     request, self.get_model(resource_type)
@@ -205,8 +218,7 @@ class SCIMApplication:
                 resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
-                if not self.continue_etag(request, resource):
-                    raise PreconditionFailed
+                self.check_preconditions(request, resource)
 
                 replacement = self.get_model(resource_type).model_validate(
                     request.json, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
@@ -240,8 +252,7 @@ class SCIMApplication:
                 resource = self.backend.get_resource(resource_type, resource_id)
                 if resource is None:
                     raise NotFound
-                if not self.continue_etag(request, resource):
-                    raise PreconditionFailed
+                self.check_preconditions(request, resource)
 
                 self.apply_patch_operation(resource, patch_operation)
                 updated = self.backend.update_resource(resource_type, resource)

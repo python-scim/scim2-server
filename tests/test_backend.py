@@ -113,6 +113,10 @@ class TestBackend:
         assert total_results == 3
         assert len(resources) == 1
 
+    def test_delete_unknown_resource(self, backend, user_type):
+        """Deleting a resource the backend does not store reports that nothing was deleted."""
+        assert backend.delete_resource(user_type, "unknown") is False
+
     def test_update_unknown_resource(self, backend, user_type):
         resource = User(id="123")
         assert backend.update_resource(user_type, resource) is None
