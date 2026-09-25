@@ -538,10 +538,10 @@ class TestSCIMProvider:
 
     @pytest.mark.parametrize("parameter", ["count", "startIndex"])
     def test_search_non_integer_pagination_is_refused(self, wsgi, parameter):
-        """A pagination parameter that is not an integer is a syntax error."""
+        """A pagination parameter that is not an integer is an invalid value."""
         r = wsgi.get("/v2/Users", params={parameter: "abc"})
         assert r.status_code == 400
-        assert r.json()["scimType"] == "invalidSyntax"
+        assert r.json()["scimType"] == "invalidValue"
 
     @pytest.mark.parametrize("endpoint", ["/v2/Users", "/v2/"])
     def test_search_filter_on_undeclared_attribute_is_refused(self, wsgi, endpoint):
