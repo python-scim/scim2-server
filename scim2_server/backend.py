@@ -125,6 +125,14 @@ class InMemoryBackend(Backend):
         extension: str | None
         field_name: str
         case_exact: bool
+        schema: str
+
+        def is_declared_by(self, resource: Resource) -> bool:
+            """Tell whether the model of a resource holds the schema of the attribute."""
+            model = type(resource)
+            return self.schema == model.__schema__ or (
+                self.schema in model.get_extension_models()
+            )
 
         def get_attribute(self, resource: Resource) -> Any:
             holder = getattr(resource, self.extension) if self.extension else resource
@@ -146,6 +154,7 @@ class InMemoryBackend(Backend):
                 extension,
                 field_name,
                 model.get_field_annotation(field_name, CaseExact) == CaseExact.true,
+                str(model.__schema__),
             )
             for field_name in model.model_fields
             if field_name != "id"
@@ -258,14 +267,16 @@ class InMemoryBackend(Backend):
             location="/v2" + resource_type.endpoint + "/" + resource.id,
         )
         self._touch_resource(resource, utcnow)
-        self._check_uniqueness(resource_type, resource)
+        self._check_uniqueness(resource)
         self.resources.append(resource)
         return resource
 
-    def _check_uniqueness(self, resource_type: ResourceType, resource: Resource):
-        """Refuse a resource sharing a unique value with another one of its type.
+    def _check_uniqueness(self, resource: Resource):
+        """Refuse a resource sharing a unique value with another one of the same schema.
 
-        A missing value never clashes, as a SQL NULL does not.
+        RFC 7643 erratum 8279 scopes the uniqueness to the resources using the
+        schema that declares the attribute, whatever their resource type. A
+        missing value never clashes, as a SQL NULL does not.
         """
         for unique_attribute in self.collect_unique_attrs(type(resource)):
             value = unique_attribute.get_attribute(resource)
@@ -273,7 +284,7 @@ class InMemoryBackend(Backend):
                 continue
             for existing_resource in self.resources:
                 if (
-                    self._is_of_type(existing_resource, resource_type)
+                    unique_attribute.is_declared_by(existing_resource)
                     and existing_resource.id != resource.id
                     and unique_attribute.get_attribute(existing_resource) == value
                 ):
@@ -300,7 +311,7 @@ class InMemoryBackend(Backend):
                 updated_resource, datetime.datetime.now(datetime.timezone.utc)
             )
 
-            self._check_uniqueness(resource_type, updated_resource)
+            self._check_uniqueness(updated_resource)
             self.resources[found_res_idx] = updated_resource
             return updated_resource
         return None

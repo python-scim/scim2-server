@@ -47,8 +47,12 @@ class TestBackend:
         FooBar = Resource.from_schema(foo_schema)[Bar]
 
         assert InMemoryBackend.collect_unique_attrs(FooBar) == [
-            InMemoryBackend.UniquenessDescriptor(None, "a", True),
-            InMemoryBackend.UniquenessDescriptor("Bar", "a", False),
+            InMemoryBackend.UniquenessDescriptor(
+                None, "a", True, "urn:example:2.0:Foo"
+            ),
+            InMemoryBackend.UniquenessDescriptor(
+                "Bar", "a", False, "urn:example:2.0:Bar"
+            ),
         ]
 
         resource = FooBar.model_validate(
@@ -63,7 +67,9 @@ class TestBackend:
         """The only uniqueness constraint checked on a User is userName, the id being assigned by the backend."""
         User = app.provider.model_for("User")
         assert InMemoryBackend.collect_unique_attrs(User) == [
-            InMemoryBackend.UniquenessDescriptor(None, "user_name", False)
+            InMemoryBackend.UniquenessDescriptor(
+                None, "user_name", False, "urn:ietf:params:scim:schemas:core:2.0:User"
+            )
         ]
 
     def test_a_missing_unique_value_does_not_clash(self):
@@ -143,6 +149,48 @@ def test_query_resources_with_an_unbound_filter_and_no_resource(backend):
     """With no stored resource, an unbound filter has nothing to be resolved against nor to match."""
     request = SearchRequest(filter='userName eq "bob"')
     assert backend.query_resources(request) == (0, [])
+
+
+def test_uniqueness_does_not_span_schemas():
+    """Two schemas declaring a unique attribute of the same name do not constrain each other."""
+
+    class Badge(Resource):
+        __schema__ = URN("urn:example:2.0:Badge")
+        code: Annotated[str | None, Uniqueness.server] = None
+
+    class Token(Resource):
+        __schema__ = URN("urn:example:2.0:Token")
+        code: Annotated[str | None, Uniqueness.server] = None
+
+    backend = InMemoryBackend()
+    backend.create_resource(ResourceType.from_resource(Badge), Badge(code="x"))
+    backend.create_resource(ResourceType.from_resource(Token), Token(code="x"))
+
+
+def test_uniqueness_of_an_extension_spans_the_resources_it_extends():
+    """An extension attribute is unique among every resource carrying the extension."""
+
+    class Tag(Extension):
+        __schema__ = URN("urn:example:2.0:Tag")
+        code: Annotated[str | None, Uniqueness.server] = None
+
+    class Badge(Resource):
+        __schema__ = URN("urn:example:2.0:Badge")
+
+    class Token(Resource):
+        __schema__ = URN("urn:example:2.0:Token")
+
+    backend = InMemoryBackend()
+    backend.create_resource(
+        ResourceType.from_resource(Badge[Tag]),
+        Badge[Tag].model_validate({"urn:example:2.0:Tag": {"code": "x"}}),
+    )
+    backend.create_resource(ResourceType.from_resource(Token), Token())
+    with pytest.raises(UniquenessException):
+        backend.create_resource(
+            ResourceType.from_resource(Token[Tag]),
+            Token[Tag].model_validate({"urn:example:2.0:Tag": {"code": "x"}}),
+        )
 
 
 def test_a_resource_type_named_apart_from_its_id(static_data):
