@@ -296,10 +296,11 @@ class InMemoryBackend(Backend):
             else:
                 found_resources = set_values + unset_values
 
+        total_results = len(found_resources)
         found_resources = found_resources[start_index:]
         if search_request.count is not None:
             found_resources = found_resources[: search_request.count]
-        return len(found_resources), found_resources
+        return total_results, found_resources
 
     def _get_resource_idx(self, resource_type_id: str, object_id: str) -> int | None:
         return next(

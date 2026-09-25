@@ -5,6 +5,7 @@ from scim2_models import Extension
 from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import SchemaExtension
+from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import User
 
@@ -82,6 +83,19 @@ class TestBackend:
         )
         assert desc_1.get_attribute(res) == "ABC"
         assert desc_2.get_attribute(res) == "DEF"
+
+    def test_query_resources_total_results_counts_beyond_the_page(self, provider):
+        """The total results count every matching resource, not only the returned page."""
+        backend = provider.backend
+        for user_name in ("a", "b", "c"):
+            backend.create_resource(
+                "User", backend.get_model("User")(user_name=user_name)
+            )
+        total_results, resources = backend.query_resources(
+            SearchRequest(start_index=2, count=1), "User"
+        )
+        assert total_results == 3
+        assert len(resources) == 1
 
     def test_meta_resource_type_name(self, provider):
         backend = provider.backend

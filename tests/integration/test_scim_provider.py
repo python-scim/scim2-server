@@ -535,6 +535,15 @@ class TestSCIMProvider:
         r = wsgi.get("/v2/InvalidResourceType")
         assert r.status_code == 404
 
+    def test_search_total_results_counts_beyond_the_page(self, wsgi, fake_user_data):
+        """The total results count every matching resource, not only the returned page."""
+        for user in fake_user_data[:3]:
+            wsgi.post("/v2/Users", json=user)
+        r = wsgi.get("/v2/Users", params={"count": 1})
+        assert r.status_code == 200
+        assert r.json()["totalResults"] == 3
+        assert len(r.json()["Resources"]) == 1
+
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""
         r = wsgi.post(
