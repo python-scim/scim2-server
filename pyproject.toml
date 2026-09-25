@@ -44,7 +44,7 @@ scim2-server = "scim2_server.cli:main"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.27.0",
+    "httpx2>=2.13.1",
     "pytest>=8.2.2",
     "pytest-coverage>=0.0",
     "prek>=0.1.0",

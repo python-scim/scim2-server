@@ -1,7 +1,7 @@
 import importlib.resources
 import json
 
-import httpx
+import httpx2
 import pytest
 
 from scim2_server.backend import InMemoryBackend
@@ -43,8 +43,8 @@ def provider(backend, static_data):
 
 @pytest.fixture
 def wsgi(provider):
-    transport = httpx.WSGITransport(app=provider)
-    client = httpx.Client(transport=transport, base_url="https://scim.example.com")
+    transport = httpx2.WSGITransport(app=provider)
+    client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
     client.__enter__()
     yield client
     provider.backend.resources = []

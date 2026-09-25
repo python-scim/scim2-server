@@ -1,6 +1,6 @@
 import datetime
 
-import httpx
+import httpx2
 import pytest
 import time_machine
 from scim2_models import SearchRequest
@@ -12,8 +12,8 @@ class TestSCIMProvider:
     """End-to-end tests for the SCIMProvider."""
 
     def test_location_mapping(self, provider):
-        transport = httpx.WSGITransport(app=provider, script_name="/foo/bar")
-        with httpx.Client(
+        transport = httpx2.WSGITransport(app=provider, script_name="/foo/bar")
+        with httpx2.Client(
             transport=transport, base_url="https://sub.testserver.company:1234"
         ) as client:
             r = client.get("/v2/ServiceProviderConfig")
