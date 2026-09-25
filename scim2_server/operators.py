@@ -4,7 +4,6 @@ from typing import Any
 from scim2_filter_parser.lexer import SCIMLexer
 from scim2_filter_parser.parser import SCIMParser
 from scim2_models import BaseModel
-from scim2_models import CaseExact
 from scim2_models import InvalidPathException
 from scim2_models import InvalidValueException
 from scim2_models import Mutability
@@ -386,91 +385,3 @@ class ResolveOperator(Operator):
             value.add_result(model, alias)
         else:
             value.add_result_index(model, alias, index)
-
-
-class ResolveSortOperator(ResolveOperator):
-    """Implement sorting in a helper Operator, according to RFC 7644, Section 3.4.2.3.
-
-    The ResolveResult returned by this operator contains at most 1 value, according to
-    the specification:
-    "[...] if it's a multi-valued attribute, resources are sorted by the value of the
-    primary attribute (see Section 2.4 of [RFC7643]), if any, or else the first value
-    in the list, if any. [...]".
-
-    Since a Query can result in resources of different types, sorting by an attribute
-    that is not defined for a certain resource type does not result in an error. No
-    value is returned and the resource is sorted as if the attribute on the resource
-    is not set.
-    """
-
-    def __init__(self, path: str | None):
-        super().__init__(path)
-
-    def alias_forbidden(self, model: BaseModel, alias: str | None) -> bool:
-        return (
-            not alias
-            or model.get_field_annotation(alias, Mutability) == Mutability.write_only
-            or model.get_field_annotation(alias, Returned) == Returned.never
-        )
-
-    def set_value_case_exact(self, value: Any, case_exact: CaseExact):
-        if isinstance(value, str) and case_exact == CaseExact.false:
-            value = value.lower()
-        self.value = value
-
-    def evaluate_value_for_complex(self, model: BaseModel, alias: str):
-        sub_attribute_alias = get_by_alias(type(model), alias, True)
-        if self.alias_forbidden(model, sub_attribute_alias):
-            return
-        case_exact = model.get_field_annotation(sub_attribute_alias, CaseExact)
-        sub_attribute_value = getattr(model, sub_attribute_alias)
-        self.set_value_case_exact(sub_attribute_value, case_exact)
-
-    def __call__(self, model: BaseModel):
-        self.value = None
-        if self.path:
-            model, path = self.parse_path(model)
-            if not path:
-                return
-            sub_attribute = path["sub_attribute"] or "value"
-
-            attribute_alias = get_by_alias(type(model), path["attribute"], True)
-            if self.alias_forbidden(model, attribute_alias):
-                return
-
-            case_exact = model.get_field_annotation(attribute_alias, CaseExact)
-            attribute_value = getattr(model, attribute_alias)
-            if not attribute_value:
-                return
-
-            if isinstance(attribute_value, list):
-                if path["condition"]:
-                    token_stream = SCIMLexer().tokenize(path["condition"])
-                    condition = SCIMParser().parse(token_stream)
-                    attribute_value = [
-                        model
-                        for model in attribute_value
-                        if evaluate_filter(model, condition)
-                    ]
-                candidate = self.select_candidate(attribute_value)
-                if isinstance(candidate, BaseModel):
-                    self.evaluate_value_for_complex(candidate, sub_attribute)
-                else:
-                    self.set_value_case_exact(candidate, case_exact)
-            elif isinstance(attribute_value, BaseModel):
-                if not path["condition"]:
-                    self.evaluate_value_for_complex(attribute_value, sub_attribute)
-            else:
-                if not path["condition"] and not path["sub_attribute"]:
-                    self.set_value_case_exact(attribute_value, case_exact)
-        return self.value
-
-    def select_candidate(self, values: list[Any]) -> tuple[Any | None, int]:
-        """Select a viable candidate from a list of possible values."""
-        for value in values:
-            primary = getattr(value, "primary", False)
-            if primary:
-                return value
-        if values:
-            return values[0]
-        return None

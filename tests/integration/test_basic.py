@@ -189,3 +189,100 @@ class TestSCIMProviderBasic:
         result = wsgi.get("/v2/Users", params={"sortBy": sort_by})
         assert result.status_code == 400
         assert result.json()["scimType"] == "invalidPath"
+
+    def test_sort_on_the_root_puts_undeclared_attributes_last(self, wsgi):
+        """RFC 7644 §3.4.2.1 treats an attribute a resource type lacks as having no value."""
+        user_id = wsgi.post(
+            "/v2/Users",
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                "userName": "bjensen",
+            },
+        ).json()["id"]
+        group_id = wsgi.post(
+            "/v2/Groups",
+            json={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+                "displayName": "admins",
+            },
+        ).json()["id"]
+
+        r = wsgi.get("/v2/", params={"sortBy": "userName"})
+        assert [resource["id"] for resource in r.json()["Resources"]] == [
+            user_id,
+            group_id,
+        ]
+        r = wsgi.get("/v2/", params={"sortBy": "userName", "sortOrder": "descending"})
+        assert [resource["id"] for resource in r.json()["Resources"]] == [
+            group_id,
+            user_id,
+        ]
+
+    @pytest.mark.parametrize(
+        ("sort_by", "first"),
+        [("externalId", "upper"), ("userName", "lower")],
+    )
+    def test_sort_follows_the_case_exactness_of_the_attribute(
+        self, wsgi, sort_by, first
+    ):
+        """A case-exact attribute sorts upper case first, another one ignores the case."""
+        ids = {}
+        for name, value in (("lower", "a"), ("upper", "B")):
+            ids[name] = wsgi.post(
+                "/v2/Users",
+                json={
+                    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                    "userName": value,
+                    "externalId": value,
+                },
+            ).json()["id"]
+
+        r = wsgi.get("/v2/Users", params={"sortBy": sort_by})
+        assert r.json()["Resources"][0]["id"] == ids[first]
+
+    def test_sort_on_an_extension_attribute(self, wsgi):
+        """An attribute qualified by an extension URN is read from the extension."""
+        enterprise = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+        ids = [
+            wsgi.post(
+                "/v2/Users",
+                json={
+                    "schemas": [
+                        "urn:ietf:params:scim:schemas:core:2.0:User",
+                        enterprise,
+                    ],
+                    "userName": user_name,
+                    enterprise: {"employeeNumber": employee_number},
+                },
+            ).json()["id"]
+            for user_name, employee_number in (("a", "2"), ("b", "1"))
+        ]
+
+        r = wsgi.get("/v2/Users", params={"sortBy": f"{enterprise}:employeeNumber"})
+        assert [resource["id"] for resource in r.json()["Resources"]] == ids[::-1]
+
+    def test_sort_reads_a_sub_attribute_from_the_primary_entry(self, wsgi):
+        """A sub-attribute of a multi-valued attribute is read from its primary entry."""
+        ids = [
+            wsgi.post(
+                "/v2/Users",
+                json={
+                    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                    "userName": user_name,
+                    "emails": emails,
+                },
+            ).json()["id"]
+            for user_name, emails in (
+                (
+                    "a",
+                    [
+                        {"value": "a@example.com", "type": "other"},
+                        {"value": "b@example.com", "type": "work", "primary": True},
+                    ],
+                ),
+                ("b", [{"value": "c@example.com", "type": "home"}]),
+            )
+        ]
+
+        r = wsgi.get("/v2/Users", params={"sortBy": "emails.type"})
+        assert [resource["id"] for resource in r.json()["Resources"]] == ids[::-1]

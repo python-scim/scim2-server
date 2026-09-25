@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-import operator
 import pickle
 import uuid
 from inspect import isclass
@@ -20,8 +19,6 @@ from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 from werkzeug.http import generate_etag
-
-from scim2_server.operators import ResolveSortOperator
 
 
 class Backend:
@@ -262,27 +259,7 @@ class InMemoryBackend(Backend):
             and (scim_filter is None or scim_filter.match(r))
         ]
 
-        if search_request.sort_by is not None:
-            descending = search_request.sort_order == SearchRequest.SortOrder.descending
-            sort_operator = ResolveSortOperator(str(search_request.sort_by))
-
-            # To ensure that unset attributes are sorted last (when ascending, as defined in the RFC),
-            # we have to divide the result set into a set and unset subset.
-            unset_values = []
-            set_values = []
-            for resource in found_resources:
-                result = sort_operator(resource)
-                if result is None:
-                    unset_values.append(resource)
-                else:
-                    set_values.append((resource, result))
-
-            set_values.sort(key=operator.itemgetter(1), reverse=descending)
-            set_values = [value[0] for value in set_values]
-            if descending:
-                found_resources = unset_values + set_values
-            else:
-                found_resources = set_values + unset_values
+        found_resources = search_request.sort(found_resources)
 
         total_results = len(found_resources)
         found_resources = found_resources[start_index:]
