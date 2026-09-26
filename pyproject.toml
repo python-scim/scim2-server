@@ -1,5 +1,5 @@
 [build-system]
-requires = ["uv_build>=0.12.16,<0.13.0"]
+requires = ["uv_build>=0.12.13,<0.13.0"]
 build-backend = "uv_build"
 
 [project]
@@ -44,13 +44,17 @@ scim2-server = "scim2_server.cli:main"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13.1",
+    "httpx2>=2.0.0",
     "pytest>=8.2.2",
     "pytest-cov>=6.0.0",
     "prek>=0.1.0",
     "time-machine>=2.14.2",
     "tox-uv>=1.16.0",
 ]
+
+[tool.uv]
+exclude-newer = "14 days"
+exclude-newer-package = { scim2-models = false, scim2-client = false, scim2-server = false, scim2-cli = false, scim2-tester = false, pytest-scim2-server = false }
 
 [tool.uv.build-backend]
 module-root = ""
