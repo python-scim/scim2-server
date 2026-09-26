@@ -999,17 +999,13 @@ class TestSCIMApplication:
         assert r.status_code == 404
 
     def test_resource_meta_dates(self, wsgi, fake_user_data):
-        @time_machine.travel(
-            datetime.datetime(2024, 3, 14, 6, 00, tzinfo=datetime.timezone.utc)
-        )
+        @time_machine.travel(datetime.datetime(2024, 3, 14, 6, 00, tzinfo=datetime.UTC))
         def create_user():
             r = wsgi.post("/v2/Users", json=fake_user_data[1])
             assert r.status_code == 201
             return r.json()
 
-        @time_machine.travel(
-            datetime.datetime(2024, 3, 16, 8, 30, tzinfo=datetime.timezone.utc)
-        )
+        @time_machine.travel(datetime.datetime(2024, 3, 16, 8, 30, tzinfo=datetime.UTC))
         def update_user(user_id):
             r = wsgi.put(f"/v2/Users/{user_id}", json={"userName": "Foo"})
             assert r.status_code == 200

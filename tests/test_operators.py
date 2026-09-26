@@ -286,9 +286,7 @@ class TestOperators:
 
         f = Foo()
         AddOperator("dt", "2010-01-23T04:56:22Z")(f)
-        assert f.dt == datetime.datetime(
-            2010, 1, 23, 4, 56, 22, tzinfo=datetime.timezone.utc
-        )
+        assert f.dt == datetime.datetime(2010, 1, 23, 4, 56, 22, tzinfo=datetime.UTC)
 
     def test_add_operator_extension_simple(self):
         u = User[EnterpriseUser]()

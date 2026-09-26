@@ -1,8 +1,6 @@
 import datetime
 import importlib.resources
 import json
-import re
-import sys
 from typing import Any
 
 from pydantic import EmailStr
@@ -159,9 +157,6 @@ def parse_value(field_root_type: type, value: Any) -> Any:
         return not value.lower() == "false"
 
     if field_root_type is datetime.datetime and isinstance(value, str):
-        # ISO 8601 datetime format (notably with the Z suffix) are only supported from Python 3.11
-        if sys.version_info < (3, 11):  # pragma: no cover
-            return datetime.datetime.fromisoformat(re.sub(r"Z$", "+00:00", value))
         return datetime.datetime.fromisoformat(value)
 
     if field_root_type is EmailStr and isinstance(value, str):

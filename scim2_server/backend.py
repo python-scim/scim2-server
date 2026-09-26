@@ -259,7 +259,7 @@ class InMemoryBackend(Backend):
     ) -> Resource | None:
         resource = resource.model_copy(deep=True)
         resource.id = uuid.uuid4().hex
-        utcnow = datetime.datetime.now(datetime.timezone.utc)
+        utcnow = datetime.datetime.now(datetime.UTC)
         resource.meta = Meta(
             resource_type=resource_type.name,
             created=utcnow,
@@ -307,9 +307,7 @@ class InMemoryBackend(Backend):
         found_res_idx = self._get_resource_idx(resource_type, resource.id)
         if found_res_idx is not None:
             updated_resource = type(resource).model_validate(resource.model_dump())
-            self._touch_resource(
-                updated_resource, datetime.datetime.now(datetime.timezone.utc)
-            )
+            self._touch_resource(updated_resource, datetime.datetime.now(datetime.UTC))
 
             self._check_uniqueness(updated_resource)
             self.resources[found_res_idx] = updated_resource
