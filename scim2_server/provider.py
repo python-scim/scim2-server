@@ -37,7 +37,6 @@ from werkzeug.routing import Rule
 from werkzeug.routing.exceptions import RequestRedirect
 
 from scim2_server.backend import Backend
-from scim2_server.operators import patch_resource
 from scim2_server.utils import load_default_service_provider_config
 
 SEARCH_REQUEST_PARAMETERS = (
@@ -167,11 +166,6 @@ class SCIMApplication:
         """Return the ETag header of a published resource, if it has a version."""
         return {"ETag": resource.meta.version} if resource.meta.version else {}
 
-    def apply_patch_operation(self, resource: Resource, patch_operation):
-        """Apply a PATCH operation to a resource."""
-        for op in patch_operation.operations:
-            patch_resource(resource, op)
-
     def check_preconditions(self, request: Request, resource: Resource) -> bool:
         """Evaluate the "If-Match" and "If-None-Match" headers against a resource.
 
@@ -257,18 +251,8 @@ class SCIMApplication:
                 )
             case _:  # "PATCH"
                 self.ensure_supported(self.config.patch, "PATCH")
-                payload = request.json
-                # MS Entra sometimes passes a "id" attribute
-                if "id" in payload:
-                    del payload["id"]
-                operations = payload.get("Operations", [])
-                for operation in operations:
-                    if "name" in operation:
-                        # MS Entra sometimes passes a "name" attribute
-                        del operation["name"]
-
                 ResourceModel = self.get_model(resource_type)
-                patch_operation = PatchOp[ResourceModel].model_validate(payload)
+                patch_operation = PatchOp[ResourceModel].model_validate(request.json)
                 response_parameters = self.get_response_parameters(
                     request, ResourceModel
                 )
@@ -277,7 +261,7 @@ class SCIMApplication:
                     raise NotFound
                 self.check_preconditions(request, resource)
 
-                self.apply_patch_operation(resource, patch_operation)
+                patch_operation.patch(resource)
                 updated = self.backend.update_resource(resource_type, resource)
 
                 if (
