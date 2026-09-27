@@ -560,7 +560,8 @@ class SCIMApplication:
                 self.check_auth(request)
 
             # Wrap the entire call in a transaction. Should probably be optimized (use transaction only when necessary).
-            with self.backend:
+            # The provider makes its policy the one every payload is read under.
+            with self.provider, self.backend:
                 response = getattr(self, f"call_{endpoint}")(request, **args)
             return response
         except RequestRedirect as e:

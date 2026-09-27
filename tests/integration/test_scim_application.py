@@ -8,6 +8,7 @@ from scim2_models import ChangePassword
 from scim2_models import ETag
 from scim2_models import Filter
 from scim2_models import Patch
+from scim2_models import ScimPolicy
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
@@ -1046,3 +1047,33 @@ class TestSCIMApplication:
         r = wsgi.get("/v2", follow_redirects=False)
         assert r.is_redirect
         assert r.headers["Location"] == "https://scim.example.com/v2/"
+
+
+class TestSCIMApplicationPolicy:
+    def test_undeclared_attribute_is_refused_by_default(self, wsgi):
+        """The default policy follows the strict reading and refuses what no schema declares."""
+        r = wsgi.post(
+            "/v2/Users", json={"userName": "bjensen", "favoriteColor": "blue"}
+        )
+        assert r.status_code == 400
+
+    def test_undeclared_attribute_follows_the_provider_policy(
+        self, wsgi_with, fake_user_data
+    ):
+        """Every payload the application reads follows the policy of its provider."""
+        wsgi = wsgi_with(policy=ScimPolicy(unknown=ScimPolicy.Unknown.ignore))
+        r = wsgi.post(
+            "/v2/Users", json={"userName": "bjensen", "favoriteColor": "blue"}
+        )
+        assert r.status_code == 201
+        assert "favoriteColor" not in r.json()
+
+        r = wsgi.put(
+            f"/v2/Users/{r.json()['id']}",
+            json={"userName": "bjensen", "favoriteColor": "blue"},
+        )
+        assert r.status_code == 200
+        assert "favoriteColor" not in r.json()
+
+        r = wsgi.post("/v2/Users/.search", json={"count": 1, "sortOrder2": "x"})
+        assert r.status_code == 200
