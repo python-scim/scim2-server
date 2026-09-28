@@ -7,9 +7,14 @@ from typing import cast
 from urllib.parse import urljoin
 
 from pydantic import ValidationError
+from scim2_models import Bulk
+from scim2_models import BulkOperation
+from scim2_models import BulkRequest
+from scim2_models import BulkResponse
 from scim2_models import Context
 from scim2_models import Error
 from scim2_models import Filter
+from scim2_models import InvalidValueException
 from scim2_models import ListResponse
 from scim2_models import Meta
 from scim2_models import Patch
@@ -31,7 +36,9 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import NotFound
 from werkzeug.exceptions import NotImplemented as WerkzeugNotImplemented
 from werkzeug.exceptions import PreconditionFailed
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.exceptions import Unauthorized
+from werkzeug.http import parse_etags
 from werkzeug.http import unquote_etag
 from werkzeug.routing import Map
 from werkzeug.routing import Rule
@@ -49,6 +56,13 @@ SEARCH_REQUEST_PARAMETERS = (
     "startIndex",
     "count",
 )
+
+BULK_SUCCESS_STATUS = {
+    BulkOperation.Method.post: 201,
+    BulkOperation.Method.put: 200,
+    BulkOperation.Method.patch: 200,
+    BulkOperation.Method.delete: 204,
+}
 
 
 class SCIMApplication:
@@ -471,7 +485,9 @@ class SCIMApplication:
         )
 
     @staticmethod
-    def ensure_supported(capability: Patch | Filter | Sort | None, operation: str):
+    def ensure_supported(
+        capability: Patch | Bulk | Filter | Sort | None, operation: str
+    ):
         """Refuse with a 501 an operation the configuration does not declare supported.
 
         RFC 7644 §3.12 answers 501 when the service provider does not support
@@ -480,9 +496,158 @@ class SCIMApplication:
         if capability is None or not capability.supported:
             raise WerkzeugNotImplemented(f"{operation} is not supported")
 
-    def call_bulk(self, request: Request, **kwargs):
-        """Implement the /Bulk endpoint, which this server does not support."""
-        raise WerkzeugNotImplemented("Bulk operations are not supported")
+    def call_bulk(self, request: Request, **kwargs) -> Response:
+        """Implement the /Bulk endpoint (RFC 7644 §3.7)."""
+        self.ensure_supported(self.config.bulk, "Bulk")
+        bulk = cast(Bulk, self.config.bulk)
+
+        if (
+            bulk.max_payload_size is not None
+            and len(request.get_data()) > bulk.max_payload_size
+        ):
+            raise RequestEntityTooLarge(
+                f"The payload exceeds the maxPayloadSize ({bulk.max_payload_size} bytes)"
+            )
+
+        bulk_request, operations = self.read_bulk_request(request.json)
+        if bulk.max_operations is not None and len(operations) > bulk.max_operations:
+            raise RequestEntityTooLarge(
+                f"The number of operations exceeds the maxOperations ({bulk.max_operations})"
+            )
+
+        results = []
+        errors = 0
+        for operation in operations:
+            result = self.run_bulk_operation(request, operation)
+            results.append(result)
+            if result["status"] < 400:
+                continue
+
+            # RFC 7644 §3.7.3: the job goes on despite failures, unless the
+            # client caps the errors it accepts with "failOnErrors".
+            errors += 1
+            if (
+                bulk_request.fail_on_errors is not None
+                and errors >= bulk_request.fail_on_errors
+            ):
+                break
+
+        return self.make_response(
+            BulkResponse[Union[tuple(self.get_models())]](  # noqa: UP007
+                operations=results
+            ).model_dump(scim_ctx=Context.BULK_RESPONSE)
+        )
+
+    def read_bulk_request(self, payload: Any) -> tuple[BulkRequest, list[Any]]:
+        """Validate the envelope of a bulk request, and return it with its raw operations.
+
+        Each operation is validated on its own, so an invalid operation only
+        fails itself (RFC 7644 §3.7.3).
+        """
+        key = (
+            next((key for key in payload if key.casefold() == "operations"), None)
+            if isinstance(payload, dict)
+            else None
+        )
+        operations = payload[key] if key else None
+        envelope = {**payload, key: []} if isinstance(operations, list) else payload
+        bulk_request = BulkRequest[Union[tuple(self.get_models())]].model_validate(  # noqa: UP007
+            envelope, scim_ctx=Context.BULK_REQUEST
+        )
+        return bulk_request, cast(list[Any], operations)
+
+    @staticmethod
+    def raw_attribute(payload: Any, name: str) -> Any:
+        """Return an attribute of a raw payload, whose names are case insensitive."""
+        if not isinstance(payload, dict):
+            return None
+        return next(
+            (
+                value
+                for key, value in payload.items()
+                if key.casefold() == name.casefold()
+            ),
+            None,
+        )
+
+    def run_bulk_operation(self, request: Request, payload: Any) -> dict[str, Any]:
+        """Apply one operation of a bulk job, and describe its outcome."""
+        method = self.raw_attribute(payload, "method")
+        bulk_id = self.raw_attribute(payload, "bulkId")
+        result: dict[str, Any] = {
+            "method": method
+            if method in [member.value for member in BulkOperation.Method]
+            else None,
+            "bulk_id": bulk_id if isinstance(bulk_id, str) else None,
+        }
+
+        try:
+            resource_type, resource_id = self.get_bulk_target(payload)
+            if resource_id:
+                result["location"] = urljoin(
+                    request.url, f"{resource_type.endpoint.strip('/')}/{resource_id}"
+                )
+            operation = BulkOperation[self.get_model(resource_type)].model_validate(
+                payload, scim_ctx=Context.BULK_REQUEST
+            )
+            resource = self.apply_bulk_operation(resource_type, resource_id, operation)
+        except Exception as exception:
+            error = self.error_from(exception)
+            return {**result, "status": error.status, "response": error}
+
+        result["status"] = BULK_SUCCESS_STATUS[operation.method]
+        if resource is not None:
+            resource = self.publish(request, resource)
+            result["location"] = resource.meta.location
+            result["version"] = resource.meta.version
+        return result
+
+    def get_bulk_target(self, payload: Any) -> tuple[ResourceType, str]:
+        """Return the resource type and the resource identifier of a bulk operation path.
+
+        :raises NotFound: When the path does not start with a resource type endpoint.
+        """
+        path = self.raw_attribute(payload, "path")
+        if not isinstance(path, str):
+            raise InvalidValueException(
+                detail="path is required for request operations"
+            )
+
+        endpoint, _, resource_id = path.lstrip("/").partition("/")
+        resource_type = self.get_resource_type_by_endpoint(endpoint)
+        if resource_type is None:
+            raise NotFound
+        return resource_type, resource_id
+
+    def apply_bulk_operation(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        operation: BulkOperation,
+    ) -> Resource | None:
+        """Apply a validated bulk operation, and return the resource it acted on.
+
+        The data of the operation is already validated, and the resource
+        operations take it as it is.
+        """
+        if (operation.method == BulkOperation.Method.post) == bool(resource_id):
+            raise InvalidValueException(
+                detail="A POST path must target a resource type endpoint, other methods a resource"
+            )
+
+        if_match = parse_etags(operation.version) if operation.version else None
+        match operation.method:
+            case BulkOperation.Method.post:
+                return self.create(resource_type, operation.data)
+            case BulkOperation.Method.put:
+                return self.replace(
+                    resource_type, resource_id, operation.data, if_match
+                )
+            case BulkOperation.Method.patch:
+                return self.patch(resource_type, resource_id, operation.data, if_match)
+            case _:  # DELETE
+                self.delete(resource_type, resource_id, if_match)
+                return None
 
     def call_me(self, request: Request, **kwargs):
         """Implement the /Me endpoint.

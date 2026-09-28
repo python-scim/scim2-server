@@ -13,8 +13,7 @@ they are lost once the process exits.
 - [x] Unique Constraints
 - [x] HTTP PATCH (Add/Remove/Replace)
 - [x] Sorting
-
-The only optional feature currently missing is support for Bulk operations ([RFC 7644, Section 3.7](https://datatracker.ietf.org/doc/html/rfc7644#section-3.7)).
+- [x] Bulk operations, except `bulkId` references ([RFC 7644, Section 3.7](https://datatracker.ietf.org/doc/html/rfc7644#section-3.7))
 
 ## Usage
 
