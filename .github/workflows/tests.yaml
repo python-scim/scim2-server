@@ -92,3 +92,15 @@ jobs:
       - name: Show logs
         if: always()
         run: docker logs scim2-server
+
+  all-checks:
+    if: always()
+    needs: [tests, minversions, style, container]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail if a needed job did not succeed
+        if: >-
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+        run: exit 1
