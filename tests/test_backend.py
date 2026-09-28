@@ -18,8 +18,8 @@ from scim2_server.backend import InMemoryBackend
 
 
 class TestBackend:
-    def test_unique_attributes(self, app):
-        """The uniqueness constraints are read from the annotations of the model, extensions included."""
+    def test_uniqueness_follows_the_case_exactness_of_each_attribute(self):
+        """A case-exact unique attribute tells values apart by case, others do not, extensions included."""
         foo_schema = Schema(
             id="urn:example:2.0:Foo",
             name="Foo",
@@ -43,34 +43,33 @@ class TestBackend:
                 ),
             ],
         )
-        Bar = Extension.from_schema(bar_schema)
-        FooBar = Resource.from_schema(foo_schema)[Bar]
+        FooBar = Resource.from_schema(foo_schema)[Extension.from_schema(bar_schema)]
+        foo_bar_type = ResourceType.from_resource(FooBar)
+        backend = InMemoryBackend()
 
-        assert InMemoryBackend.collect_unique_attrs(FooBar) == [
-            InMemoryBackend.UniquenessDescriptor(
-                None, "a", True, "urn:example:2.0:Foo"
-            ),
-            InMemoryBackend.UniquenessDescriptor(
-                "Bar", "a", False, "urn:example:2.0:Bar"
-            ),
-        ]
+        def create(foo, bar):
+            payload = {"a": foo, "urn:example:2.0:Bar": {"a": bar}}
+            backend.create_resource(foo_bar_type, FooBar.model_validate(payload))
 
-        resource = FooBar.model_validate(
-            {"a": "ABC", "urn:example:2.0:Bar": {"a": "DEF"}}
-        )
-        foo, bar = InMemoryBackend.collect_unique_attrs(FooBar)
-        assert foo.get_attribute(resource) == "ABC"
-        assert bar.get_attribute(resource) == "def"
-        assert bar.get_attribute(FooBar(a="ABC")) is None
+        create("ABC", "DEF")
+        create("abc", "GHI")
+        with pytest.raises(UniquenessException):
+            create("ABC", "JKL")
+        with pytest.raises(UniquenessException):
+            create("XYZ", "def")
 
-    def test_unique_attributes_of_the_default_user(self, app):
-        """The only uniqueness constraint checked on a User is userName, the id being assigned by the backend."""
+    def test_only_the_user_name_of_the_default_user_is_unique(self, app, user_type):
+        """Two users sharing every value but their userName do not conflict."""
         User = app.provider.model_for("User")
-        assert InMemoryBackend.collect_unique_attrs(User) == [
-            InMemoryBackend.UniquenessDescriptor(
-                None, "user_name", False, "urn:ietf:params:scim:schemas:core:2.0:User"
-            )
-        ]
+        payload = {"displayName": "Babs", "externalId": "1", "nickName": "bj"}
+        app.backend.create_resource(
+            user_type, User.model_validate({"userName": "bjensen", **payload})
+        )
+        app.backend.create_resource(
+            user_type, User.model_validate({"userName": "jsmith", **payload})
+        )
+        with pytest.raises(UniquenessException):
+            app.backend.create_resource(user_type, User(user_name="bjensen"))
 
     def test_a_missing_unique_value_does_not_clash(self):
         """Two resources lacking a unique value do not conflict, as SQL NULLs do not."""

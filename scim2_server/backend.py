@@ -1,16 +1,14 @@
-import dataclasses
 import datetime
 import pickle
 import uuid
-from inspect import isclass
 from threading import Lock
 from typing import Any
 from typing import Union
+from typing import cast
 
-from scim2_models import BaseModel
-from scim2_models import CaseExact
-from scim2_models import Extension
+from scim2_models import AttributeBinding
 from scim2_models import Meta
+from scim2_models import Path
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ScimFilter
@@ -117,54 +115,6 @@ class InMemoryBackend(Backend):
     database in the backend. This is intentional to keep the
     implementation simple.
     """
-
-    @dataclasses.dataclass(frozen=True)
-    class UniquenessDescriptor:
-        """Used to mimic uniqueness constraints e.g. from a SQL database."""
-
-        extension: str | None
-        field_name: str
-        case_exact: bool
-        schema: str
-
-        def is_declared_by(self, resource: Resource) -> bool:
-            """Tell whether the model of a resource holds the schema of the attribute."""
-            model = type(resource)
-            return self.schema == model.__schema__ or (
-                self.schema in model.get_extension_models()
-            )
-
-        def get_attribute(self, resource: Resource) -> Any:
-            holder = getattr(resource, self.extension) if self.extension else resource
-            value = getattr(holder, self.field_name, None) if holder else None
-            if isinstance(value, str) and not self.case_exact:
-                return value.casefold()
-            return value
-
-    @classmethod
-    def collect_unique_attrs(
-        cls, model: type[BaseModel], extension: str | None = None
-    ) -> list[UniquenessDescriptor]:
-        """Return the uniqueness constraints the annotations of a model declare.
-
-        The ``id`` is left out: the backend issues it, so it cannot clash.
-        """
-        descriptors = [
-            cls.UniquenessDescriptor(
-                extension,
-                field_name,
-                model.get_field_annotation(field_name, CaseExact) == CaseExact.true,
-                str(model.__schema__),
-            )
-            for field_name in model.model_fields
-            if field_name != "id"
-            and model.get_field_annotation(field_name, Uniqueness) != Uniqueness.none
-        ]
-        for field_name in model.model_fields:
-            root_type = model.get_field_root_type(field_name)
-            if isclass(root_type) and issubclass(root_type, Extension):
-                descriptors.extend(cls.collect_unique_attrs(root_type, field_name))
-        return descriptors
 
     def __init__(self):
         super().__init__()
@@ -278,17 +228,32 @@ class InMemoryBackend(Backend):
         schema that declares the attribute, whatever their resource type. A
         missing value never clashes, as a SQL NULL does not.
         """
-        for unique_attribute in self.collect_unique_attrs(type(resource)):
-            value = unique_attribute.get_attribute(resource)
+        unique_paths = Path[type(resource)].iter_paths(
+            include_subattributes=False,
+            uniqueness=[Uniqueness.server, Uniqueness.global_],
+        )
+        for path in unique_paths:
+            attribute = cast(AttributeBinding, path.resolve())
+            value = self._unique_value(resource, attribute)
             if value is None:
                 continue
             for existing_resource in self.resources:
                 if (
-                    unique_attribute.is_declared_by(existing_resource)
-                    and existing_resource.id != resource.id
-                    and unique_attribute.get_attribute(existing_resource) == value
+                    existing_resource.id != resource.id
+                    and self._unique_value(existing_resource, attribute) == value
                 ):
                     raise UniquenessException()
+
+    @staticmethod
+    def _unique_value(resource: Resource, attribute: AttributeBinding) -> Any:
+        """Return the value a resource holds for a unique attribute, in the form it is compared in.
+
+        A resource whose schemas do not declare the attribute holds no value.
+        """
+        value = Path[type(resource)](attribute.urn).get(resource, strict=False)
+        if isinstance(value, str) and not attribute.case_exact:
+            return value.casefold()
+        return value
 
     @staticmethod
     def _touch_resource(resource: Resource, last_modified: datetime.datetime):
