@@ -261,16 +261,17 @@ class SCIMApplication:
                     raise NotFound
                 self.check_preconditions(request, resource)
 
-                patch_operation.patch(resource)
-                updated = self.backend.update_resource(resource_type, resource)
+                # A PATCH that changes nothing keeps meta.lastModified and the ETag.
+                if patch_operation.patch(resource):
+                    resource = self.backend.update_resource(resource_type, resource)
 
                 if (
                     response_parameters.attributes
                     or response_parameters.excluded_attributes
                 ):
-                    updated = self.publish(request, updated)
+                    resource = self.publish(request, resource)
                     return self.make_response(
-                        updated.model_dump(
+                        resource.model_dump(
                             scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE,
                             response_parameters=response_parameters,
                         )
@@ -282,7 +283,7 @@ class SCIMApplication:
                     return self.make_response(
                         None,
                         204,
-                        headers=self.etag_header(self.publish(request, updated)),
+                        headers=self.etag_header(self.publish(request, resource)),
                     )
 
     @staticmethod
