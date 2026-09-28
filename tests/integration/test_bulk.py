@@ -361,3 +361,182 @@ class TestBulkRequest:
         (result,) = bulk(client, [create_user("paul")]).json()["Operations"]
         assert result["status"] == "201"
         assert "version" not in result
+
+
+def create_group(display_name, bulk_id, *member_bulk_ids):
+    return {
+        "method": "POST",
+        "path": "/Groups",
+        "bulkId": bulk_id,
+        "data": {
+            "displayName": display_name,
+            "members": [
+                {"type": "User", "value": f"bulkId:{member_bulk_id}"}
+                for member_bulk_id in member_bulk_ids
+            ],
+        },
+    }
+
+
+class TestBulkIdReferences:
+    def test_reference_in_data(self, wsgi):
+        """RFC 7644 §3.7.2: a bulkId reference is replaced with the id of the created resource."""
+        r = bulk(
+            wsgi, [create_user("alice", "qwerty"), create_group("g", "g", "qwerty")]
+        )
+        user, group = r.json()["Operations"]
+        assert group["status"] == "201"
+        user_id = wsgi.get(user["location"]).json()["id"]
+        members = wsgi.get(group["location"]).json()["members"]
+        assert [member["value"] for member in members] == [user_id]
+
+    def test_forward_reference(self, wsgi):
+        """A creation runs before the operation that references it, and the results keep the order of the request."""
+        r = bulk(wsgi, [create_group("g", "g", "qwerty"), create_user("bob", "qwerty")])
+        group, user = r.json()["Operations"]
+        assert group["bulkId"] == "g"
+        assert user["bulkId"] == "qwerty"
+        assert group["status"] == "201"
+        user_id = wsgi.get(user["location"]).json()["id"]
+        members = wsgi.get(group["location"]).json()["members"]
+        assert [member["value"] for member in members] == [user_id]
+
+    def test_reference_in_path(self, wsgi):
+        """An operation can target a resource the same request creates."""
+        r = bulk(
+            wsgi,
+            [
+                create_user("carol", "qwerty"),
+                {"method": "DELETE", "path": "/Users/bulkId:qwerty"},
+            ],
+        )
+        user, deletion = r.json()["Operations"]
+        assert deletion["status"] == "204"
+        assert deletion["location"] == user["location"]
+        assert wsgi.get(user["location"]).status_code == 404
+
+    def test_reference_in_patch_value(self, wsgi):
+        """A bulkId reference is replaced in the values of a PATCH."""
+        r = bulk(
+            wsgi,
+            [
+                create_group("g", "g"),
+                create_user("dave", "qwerty"),
+                {
+                    "method": "PATCH",
+                    "path": "/Groups/bulkId:g",
+                    "data": {
+                        "schemas": [PATCH_OP],
+                        "Operations": [
+                            {
+                                "op": "add",
+                                "path": "members",
+                                "value": [{"value": "bulkId:qwerty"}],
+                            }
+                        ],
+                    },
+                },
+            ],
+        )
+        group, user, patch = r.json()["Operations"]
+        assert patch["status"] == "200"
+        user_id = wsgi.get(user["location"]).json()["id"]
+        members = wsgi.get(group["location"]).json()["members"]
+        assert [member["value"] for member in members] == [user_id]
+
+    def test_reference_to_a_manager(self, wsgi):
+        """A reference to a manager needs no $ref."""
+        enterprise = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+        r = bulk(
+            wsgi,
+            [
+                create_user("erin", "boss"),
+                {
+                    "method": "POST",
+                    "path": "/Users",
+                    "bulkId": "employee",
+                    "data": {
+                        "schemas": [
+                            "urn:ietf:params:scim:schemas:core:2.0:User",
+                            enterprise,
+                        ],
+                        "userName": "frank",
+                        enterprise: {"manager": {"value": "bulkId:boss"}},
+                    },
+                },
+            ],
+        )
+        boss, employee = r.json()["Operations"]
+        assert employee["status"] == "201"
+        boss_id = wsgi.get(boss["location"]).json()["id"]
+        assert (
+            wsgi.get(employee["location"]).json()[enterprise]["manager"]["value"]
+            == boss_id
+        )
+
+    def test_circular_reference(self, wsgi):
+        """RFC 7644 §3.7.1: the operations of a circular reference answer 409."""
+        r = bulk(wsgi, [create_group("a", "a", "b"), create_group("b", "b", "a")])
+        first, second = r.json()["Operations"]
+        assert first["status"] == "409"
+        assert (
+            first["response"]["detail"] == "No resource was created with the bulkId b"
+        )
+        assert second["status"] == "409"
+        assert (
+            second["response"]["detail"]
+            == "The bulkId a is part of a circular reference"
+        )
+        assert wsgi.get("/v2/Groups").json()["totalResults"] == 0
+
+    def test_self_reference(self, wsgi):
+        """A creation that references itself answers 409."""
+        (result,) = bulk(wsgi, [create_group("a", "a", "a")]).json()["Operations"]
+        assert result["status"] == "409"
+        assert (
+            result["response"]["detail"]
+            == "The bulkId a is part of a circular reference"
+        )
+
+    def test_unknown_reference(self, wsgi):
+        """A reference to a bulkId no operation creates answers 409."""
+        (result,) = bulk(wsgi, [create_group("a", "a", "unknown")]).json()["Operations"]
+        assert result["status"] == "409"
+        assert (
+            result["response"]["detail"]
+            == "No resource was created with the bulkId unknown"
+        )
+
+    def test_reference_to_a_failed_creation(self, wsgi):
+        """A reference to a creation that failed answers 409."""
+        failed = {"method": "POST", "path": "/Users", "bulkId": "qwerty", "data": {}}
+        r = bulk(wsgi, [failed, create_group("g", "g", "qwerty")])
+        user, group = r.json()["Operations"]
+        assert user["status"] == "400"
+        assert group["status"] == "409"
+
+    def test_duplicate_bulk_id(self, wsgi):
+        """A bulkId is unique in a request: a second creation with it answers 400, and references go to the first."""
+        r = bulk(
+            wsgi,
+            [
+                create_user("grace", "qwerty"),
+                create_user("heidi", "qwerty"),
+                create_group("g", "g", "qwerty"),
+            ],
+        )
+        first, second, group = r.json()["Operations"]
+        assert second["status"] == "400"
+        assert second["response"]["scimType"] == "invalidValue"
+        user_id = wsgi.get(first["location"]).json()["id"]
+        members = wsgi.get(group["location"]).json()["members"]
+        assert [member["value"] for member in members] == [user_id]
+
+    def test_fail_on_errors_counts_the_referenced_creations(self, wsgi):
+        """A failed creation that runs first can stop the job before the operation that references it."""
+        failed = {"method": "POST", "path": "/Users", "bulkId": "qwerty", "data": {}}
+        r = bulk(wsgi, [create_group("g", "g", "qwerty"), failed], failOnErrors=1)
+        (result,) = r.json()["Operations"]
+        assert result["bulkId"] == "qwerty"
+        assert result["status"] == "400"
+        assert wsgi.get("/v2/Groups").json()["totalResults"] == 0

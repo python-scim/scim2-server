@@ -45,6 +45,9 @@ from werkzeug.routing import Rule
 from werkzeug.routing.exceptions import RequestRedirect
 
 from scim2_server.backend import Backend
+from scim2_server.bulk import BulkJob
+from scim2_server.bulk import Resolver
+from scim2_server.bulk import raw_attribute
 from scim2_server.utils import load_default_service_provider_config
 
 SEARCH_REQUEST_PARAMETERS = (
@@ -515,23 +518,11 @@ class SCIMApplication:
                 f"The number of operations exceeds the maxOperations ({bulk.max_operations})"
             )
 
-        results = []
-        errors = 0
-        for operation in operations:
-            result = self.run_bulk_operation(request, operation)
-            results.append(result)
-            if result["status"] < 400:
-                continue
-
-            # RFC 7644 §3.7.3: the job goes on despite failures, unless the
-            # client caps the errors it accepts with "failOnErrors".
-            errors += 1
-            if (
-                bulk_request.fail_on_errors is not None
-                and errors >= bulk_request.fail_on_errors
-            ):
-                break
-
+        results = BulkJob(
+            operations,
+            bulk_request.fail_on_errors,
+            lambda payload, resolve: self.run_bulk_operation(request, payload, resolve),
+        ).run()
         return self.make_response(
             BulkResponse[Union[tuple(self.get_models())]](  # noqa: UP007
                 operations=results
@@ -556,24 +547,15 @@ class SCIMApplication:
         )
         return bulk_request, cast(list[Any], operations)
 
-    @staticmethod
-    def raw_attribute(payload: Any, name: str) -> Any:
-        """Return an attribute of a raw payload, whose names are case insensitive."""
-        if not isinstance(payload, dict):
-            return None
-        return next(
-            (
-                value
-                for key, value in payload.items()
-                if key.casefold() == name.casefold()
-            ),
-            None,
-        )
+    def run_bulk_operation(
+        self, request: Request, payload: Any, resolve: Resolver
+    ) -> tuple[dict[str, Any], Resource | None]:
+        """Apply one operation of a bulk job.
 
-    def run_bulk_operation(self, request: Request, payload: Any) -> dict[str, Any]:
-        """Apply one operation of a bulk job, and describe its outcome."""
-        method = self.raw_attribute(payload, "method")
-        bulk_id = self.raw_attribute(payload, "bulkId")
+        :return: The outcome of the operation, and the resource it created or updated.
+        """
+        method = raw_attribute(payload, "method")
+        bulk_id = raw_attribute(payload, "bulkId")
         result: dict[str, Any] = {
             "method": method
             if method in [member.value for member in BulkOperation.Method]
@@ -582,6 +564,7 @@ class SCIMApplication:
         }
 
         try:
+            payload = resolve(payload)
             resource_type, resource_id = self.get_bulk_target(payload)
             if resource_id:
                 result["location"] = urljoin(
@@ -593,21 +576,23 @@ class SCIMApplication:
             resource = self.apply_bulk_operation(resource_type, resource_id, operation)
         except Exception as exception:
             error = self.error_from(exception)
-            return {**result, "status": error.status, "response": error}
+            return {**result, "status": error.status, "response": error}, None
 
         result["status"] = BULK_SUCCESS_STATUS[operation.method]
-        if resource is not None:
-            resource = self.publish(request, resource)
-            result["location"] = resource.meta.location
-            result["version"] = resource.meta.version
-        return result
+        if resource is None:
+            return result, None
+
+        resource = self.publish(request, resource)
+        result["location"] = resource.meta.location
+        result["version"] = resource.meta.version
+        return result, resource
 
     def get_bulk_target(self, payload: Any) -> tuple[ResourceType, str]:
         """Return the resource type and the resource identifier of a bulk operation path.
 
         :raises NotFound: When the path does not start with a resource type endpoint.
         """
-        path = self.raw_attribute(payload, "path")
+        path = raw_attribute(payload, "path")
         if not isinstance(path, str):
             raise InvalidValueException(
                 detail="path is required for request operations"
