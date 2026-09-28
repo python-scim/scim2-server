@@ -718,6 +718,17 @@ class TestSCIMApplication:
         assert r.status_code == 400
         assert r.json()["scimType"] == "invalidPath"
 
+    @pytest.mark.parametrize("body", [b"[1]", b"[]", b'"filter"', b"1", b"null"])
+    def test_search_post_body_that_is_not_an_object_is_refused(self, wsgi, body):
+        """RFC 7644 §3.4.3 sends the search parameters as a JSON object."""
+        r = wsgi.post(
+            "/v2/Users/.search",
+            content=body,
+            headers={"Content-Type": "application/scim+json"},
+        )
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidSyntax"
+
     def test_search_invalid_sort_order_is_refused(self, wsgi):
         """RFC 7644 §3.4.2.3 only allows "ascending" and "descending"."""
         r = wsgi.get("/v2/Users", params={"sortBy": "userName", "sortOrder": "bogus"})

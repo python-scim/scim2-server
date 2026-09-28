@@ -321,7 +321,9 @@ class SCIMApplication:
         # The filters of PATCH paths are part of the PATCH capability: the
         # filter capability of RFC 7643 §5 refers to the search parameter of
         # RFC 7644 §3.4.2.2 only.
-        parameters = {key.casefold() for key in payload}
+        parameters = (
+            {key.casefold() for key in payload} if isinstance(payload, dict) else set()
+        )
         if "filter" in parameters:
             self.ensure_supported(self.config.filter, "Filtering")
         if parameters & {"sortby", "sortorder"}:
