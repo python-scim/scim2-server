@@ -603,18 +603,6 @@ wheels = [
 ]
 
 [[package]]
-name = "scim2-filter-parser"
-version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "sly" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/25/c0/2f4d5caee8faa8f0d0979584c4aab95fa69d626d6f9d211dd6bb7089bc2f/scim2_filter_parser-0.7.0.tar.gz", hash = "sha256:1e11dbe2e186fc1be6d93732b467a3bbaa9deff272dfeb3a0540394cfab7030c", size = 21358, upload-time = "2024-07-20T16:38:23.2Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/54/b54961bfc5018fa593758c439fe0d4a22fbadfabff49a7559850af9a79e1/scim2_filter_parser-0.7.0-py3-none-any.whl", hash = "sha256:a74f90a2d52a77e0f1bc4d77e84b79f88749469f6f7192d64a4f92e4fe50ab69", size = 23409, upload-time = "2024-07-20T16:38:21.525Z" },
-]
-
-[[package]]
 name = "scim2-models"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -632,7 +620,6 @@ name = "scim2-server"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "scim2-filter-parser" },
     { name = "scim2-models" },
     { name = "werkzeug" },
 ]
@@ -649,7 +636,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "scim2-filter-parser", specifier = ">=0.7.0" },
     { name = "scim2-models", specifier = ">=0.9.0" },
     { name = "werkzeug", specifier = ">=3.0.3" },
 ]
@@ -662,15 +648,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "time-machine", specifier = ">=2.14.2" },
     { name = "tox-uv", specifier = ">=1.16.0" },
-]
-
-[[package]]
-name = "sly"
-version = "0.5"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/41/8a/59e943f7b27904c7756a7b565ffbd55f3841f5cd3d2da2b2b0713c49e488/sly-0.5.tar.gz", hash = "sha256:251d42015e8507158aec2164f06035df4a82b0314ce6450f457d7125e7649024", size = 66702, upload-time = "2022-10-25T14:35:30.592Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/4d/c96d807295183f2360329cd8d8bf5e8072c53d664125b3858c04153f026e/sly-0.5-py3-none-any.whl", hash = "sha256:20485483259eec7f6ba85ff4d2e96a4e50c6621902667fc2695cc8bc2a3e5133", size = 28864, upload-time = "2022-10-25T14:35:28.054Z" },
 ]
 
 [[package]]

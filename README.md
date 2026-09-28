@@ -1,7 +1,7 @@
 # scim2-server
 
 This is an example WSGI-SCIM server using [scim2-models](https://github.com/python-scim/scim2-models).
-It utilizes [werkzeug](https://werkzeug.palletsprojects.com/) and [scim2-filter-parser](https://github.com/15five/scim2-filter-parser) and keeps all resources in-memory,
+It utilizes [werkzeug](https://werkzeug.palletsprojects.com/) and keeps all resources in-memory,
 they are lost once the process exits.
 
 ## Features
