@@ -921,6 +921,18 @@ class TestSCIMApplication:
         r = wsgi.get("/v2/Users", params={"filter": 'title eq "STRASSE"'})
         assert [u["userName"] for u in r.json()["Resources"]] == ["alice"]
 
+    def test_search_compares_a_password_with_its_case(self, wsgi):
+        """RFC 7643 §4.1.1 compares passwords by salted hash, which keeps the case."""
+        wsgi.post("/v2/Users", json={"userName": "alice", "password": "Secret"})
+        for password, expected in (
+            ("Secret", ["alice"]),
+            ("secret", []),
+            ("SECRET", []),
+        ):
+            r = wsgi.get("/v2/Users", params={"filter": f'password eq "{password}"'})
+            assert r.status_code == 200
+            assert [u["userName"] for u in r.json().get("Resources", [])] == expected
+
     def test_search_filters_on_the_schemas_a_resource_carries(self, wsgi):
         """RFC 7644 §3.4.2.2 lets a client query resources by schema extension."""
         enterprise = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
