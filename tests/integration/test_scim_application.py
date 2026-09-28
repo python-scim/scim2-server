@@ -51,7 +51,9 @@ class TestSCIMApplication:
         assert r.json() == {
             "authenticationSchemes": [],
             "bulk": {
-                "supported": False,
+                "maxOperations": 1000,
+                "maxPayloadSize": 1048576,
+                "supported": True,
             },
             "changePassword": {"supported": True},
             "etag": {"supported": True},
@@ -73,7 +75,9 @@ class TestSCIMApplication:
         assert r.json() == {
             "authenticationSchemes": [],
             "bulk": {
-                "supported": False,
+                "maxOperations": 1000,
+                "maxPayloadSize": 1048576,
+                "supported": True,
             },
             "changePassword": {"supported": True},
             "etag": {"supported": True},
@@ -875,18 +879,6 @@ class TestSCIMApplication:
             },
         )
         assert r.status_code == 204
-
-    def test_bulk_is_not_implemented(self, wsgi):
-        """RFC 7644 §3.7: bulk is optional, and this server answers 501 to it."""
-        r = wsgi.post(
-            "/v2/Bulk",
-            json={
-                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-                "Operations": [],
-            },
-        )
-        assert r.status_code == 501
-        assert r.json()["detail"] == "Bulk operations are not supported"
 
     def test_validation_error_carries_scim_type(self, wsgi):
         """A payload refused by validation answers with a SCIM error keyword."""
