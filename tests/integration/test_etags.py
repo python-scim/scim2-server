@@ -161,6 +161,32 @@ class TestSCIMApplicationETags:
         )
         assert r.json()["userName"] == "Foo"
 
+    def test_resource_patch_without_change_keeps_the_version(
+        self, wsgi, first_fake_user
+    ):
+        """A PATCH that changes nothing keeps meta.lastModified and the ETag (RFC 7643 §3.1)."""
+        initial = wsgi.get(f"/v2/Users/{first_fake_user}").json()
+
+        r = wsgi.patch(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {
+                        "op": "replace",
+                        "path": "userName",
+                        "value": initial["userName"],
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 204
+        assert r.headers["etag"] == initial["meta"]["version"]
+
+        meta = wsgi.get(f"/v2/Users/{first_fake_user}").json()["meta"]
+        assert meta["version"] == initial["meta"]["version"]
+        assert meta["lastModified"] == initial["meta"]["lastModified"]
+
     def test_resource_get_not_modified_carries_the_etag(self, wsgi, first_fake_user):
         """RFC 7232 §4.1: a 304 carries the ETag a 200 would have carried."""
         version = wsgi.get(f"/v2/Users/{first_fake_user}").headers["etag"]

@@ -60,14 +60,15 @@ def wsgi(app):
 
 @pytest.fixture
 def wsgi_with(backend, scim_provider):
-    """Build clients of applications serving the default resources under another configuration."""
+    """Build clients of applications serving the default resources under another configuration or policy."""
     clients = []
 
-    def build(config):
+    def build(config=None, policy=None):
         provider = ScimProvider(
             models=scim_provider.models,
             resource_types=scim_provider.resource_types,
-            config=config,
+            config=config or scim_provider.config,
+            policy=policy,
         )
         transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
         client = httpx2.Client(transport=transport, base_url="https://scim.example.com")

@@ -1,6 +1,13 @@
 import uuid
 
 import pytest
+from scim2_models import ScimPolicy
+
+
+@pytest.fixture
+def wsgi(wsgi_with):
+    """Serve the default resources under the tolerances Entra needs."""
+    return wsgi_with(policy=ScimPolicy(unknown=ScimPolicy.Unknown.ignore))
 
 
 class TestSCIMApplicationMSEntraIntegration:
@@ -333,7 +340,9 @@ class TestSCIMApplicationMSEntraIntegration:
         r = wsgi.get(f"/v2/Groups/{group_id}")
         assert r.status_code == 200
         assert r.json()["id"] == group_id
-        assert "new User" in r.text
+        assert id4 in r.text
+        # Members declare "display", not "displayName", which the policy ignores.
+        assert "new User" not in r.text
 
         # Patch remove all users
         r = wsgi.patch(
@@ -1291,7 +1300,7 @@ class TestSCIMApplicationMSEntraIntegration:
         assert r.status_code == 201
         group1 = r.json()["id"]
 
-        # Group patch add member
+        # Group patch add member, a bare string being no member value
         r = wsgi.patch(
             f"/v2/Groups/{group1}",
             json={
@@ -1302,7 +1311,8 @@ class TestSCIMApplicationMSEntraIntegration:
                 "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             },
         )
-        assert r.status_code == 204
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidValue"
 
         # Group patch add member2
         r = wsgi.patch(
@@ -1315,7 +1325,8 @@ class TestSCIMApplicationMSEntraIntegration:
                 "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             },
         )
-        assert r.status_code == 204
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "invalidValue"
 
         # Get group
         r = wsgi.get(f"/v2/Groups/{group1}")

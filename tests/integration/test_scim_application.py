@@ -8,6 +8,7 @@ from scim2_models import ChangePassword
 from scim2_models import ETag
 from scim2_models import Filter
 from scim2_models import Patch
+from scim2_models import ScimPolicy
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
@@ -1046,3 +1047,85 @@ class TestSCIMApplication:
         r = wsgi.get("/v2", follow_redirects=False)
         assert r.is_redirect
         assert r.headers["Location"] == "https://scim.example.com/v2/"
+
+
+class TestSCIMApplicationPolicy:
+    def test_undeclared_attribute_is_refused_by_default(self, wsgi):
+        """The default policy follows the strict reading and refuses what no schema declares."""
+        r = wsgi.post(
+            "/v2/Users", json={"userName": "bjensen", "favoriteColor": "blue"}
+        )
+        assert r.status_code == 400
+
+    def test_undeclared_attribute_follows_the_provider_policy(
+        self, wsgi_with, fake_user_data
+    ):
+        """Every payload the application reads follows the policy of its provider."""
+        wsgi = wsgi_with(policy=ScimPolicy(unknown=ScimPolicy.Unknown.ignore))
+        r = wsgi.post(
+            "/v2/Users", json={"userName": "bjensen", "favoriteColor": "blue"}
+        )
+        assert r.status_code == 201
+        assert "favoriteColor" not in r.json()
+
+        r = wsgi.put(
+            f"/v2/Users/{r.json()['id']}",
+            json={"userName": "bjensen", "favoriteColor": "blue"},
+        )
+        assert r.status_code == 200
+        assert "favoriteColor" not in r.json()
+
+        r = wsgi.post("/v2/Users/.search", json={"count": 1, "sortOrder2": "x"})
+        assert r.status_code == 200
+
+    def test_patch_message_fields_follow_the_provider_policy(self, wsgi_with):
+        """Entra sends an "id" and an operation "name" that only a tolerant policy accepts."""
+        payload = {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "id": "whatever",
+            "Operations": [
+                {"name": "addMember", "op": "replace", "path": "active", "value": True}
+            ],
+        }
+
+        wsgi = wsgi_with()
+        user_id = wsgi.post("/v2/Users", json={"userName": "bjensen"}).json()["id"]
+        r = wsgi.patch(f"/v2/Users/{user_id}", json=payload)
+        assert r.status_code == 400
+
+        wsgi = wsgi_with(policy=ScimPolicy(unknown=ScimPolicy.Unknown.ignore))
+        user_id = wsgi.post("/v2/Users", json={"userName": "alice"}).json()["id"]
+        r = wsgi.patch(f"/v2/Users/{user_id}", json=payload)
+        assert r.status_code == 204
+        assert wsgi.get(f"/v2/Users/{user_id}").json()["active"] is True
+
+    def test_patch_applies_under_the_provider_policy(self, wsgi_with):
+        """A path filter matching no value creates the entry only when the policy allows it."""
+        payload = {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [
+                {
+                    "op": "replace",
+                    "path": 'emails[type eq "work"].value',
+                    "value": "bjensen@example.com",
+                }
+            ],
+        }
+
+        wsgi = wsgi_with()
+        user_id = wsgi.post("/v2/Users", json={"userName": "bjensen"}).json()["id"]
+        r = wsgi.patch(f"/v2/Users/{user_id}", json=payload)
+        assert r.status_code == 400
+        assert r.json()["scimType"] == "noTarget"
+
+        wsgi = wsgi_with(
+            policy=ScimPolicy(
+                unmatched_path_filter=ScimPolicy.UnmatchedPathFilter.create
+            )
+        )
+        user_id = wsgi.post("/v2/Users", json={"userName": "alice"}).json()["id"]
+        r = wsgi.patch(f"/v2/Users/{user_id}", json=payload)
+        assert r.status_code == 204
+        assert wsgi.get(f"/v2/Users/{user_id}").json()["emails"] == [
+            {"type": "work", "value": "bjensen@example.com"}
+        ]
