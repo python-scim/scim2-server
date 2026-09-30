@@ -251,7 +251,9 @@ class SCIMApplication:
         replacement = self.get_model(resource_type).model_validate(
             payload, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
         )
-        replacement.replace(resource)
+        # A PUT that changes nothing keeps meta.lastModified and the ETag.
+        if not replacement.replace(resource):
+            return resource
         return self.backend.update_resource(resource_type, replacement)
 
     def patch(

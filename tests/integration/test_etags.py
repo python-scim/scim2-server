@@ -187,6 +187,34 @@ class TestSCIMApplicationETags:
         assert meta["version"] == initial["meta"]["version"]
         assert meta["lastModified"] == initial["meta"]["lastModified"]
 
+    def test_resource_put_without_change_keeps_the_version(self, wsgi, first_fake_user):
+        """A PUT that changes nothing keeps meta.lastModified and the ETag (RFC 7643 §3.1)."""
+        initial = wsgi.get(f"/v2/Users/{first_fake_user}").json()
+        emails = list(reversed(initial.get("emails", [])))
+
+        r = wsgi.put(f"/v2/Users/{first_fake_user}", json={**initial, "emails": emails})
+        assert r.status_code == 200
+        assert r.headers["etag"] == initial["meta"]["version"]
+
+        meta = wsgi.get(f"/v2/Users/{first_fake_user}").json()["meta"]
+        assert meta["version"] == initial["meta"]["version"]
+        assert meta["lastModified"] == initial["meta"]["lastModified"]
+
+    def test_resource_put_with_change_updates_the_version(self, wsgi, first_fake_user):
+        """A PUT that changes the resource gives it a new ETag and lastModified."""
+        initial = wsgi.get(f"/v2/Users/{first_fake_user}").json()
+
+        r = wsgi.put(
+            f"/v2/Users/{first_fake_user}",
+            json={**initial, "displayName": "Someone else"},
+        )
+        assert r.status_code == 200
+        assert r.headers["etag"] != initial["meta"]["version"]
+
+        meta = wsgi.get(f"/v2/Users/{first_fake_user}").json()["meta"]
+        assert meta["version"] != initial["meta"]["version"]
+        assert meta["lastModified"] != initial["meta"]["lastModified"]
+
     def test_resource_get_not_modified_carries_the_etag(self, wsgi, first_fake_user):
         """RFC 7232 §4.1: a 304 carries the ETag a 200 would have carried."""
         version = wsgi.get(f"/v2/Users/{first_fake_user}").headers["etag"]
