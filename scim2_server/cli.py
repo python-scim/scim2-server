@@ -119,6 +119,7 @@ def main():
         app,
         use_debugger=args.debug,
         use_reloader=args.debug,
+        threaded=True,
     )
 
     if args.dump_resources:
