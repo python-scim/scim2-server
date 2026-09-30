@@ -1,55 +1,71 @@
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import BaseModel
+from scim2_models import BulkOperation
 from scim2_models import InvalidValueException
 from scim2_models import Resource
 from werkzeug.exceptions import Conflict
 
 BULK_ID_PREFIX = "bulkId:"
 
-Resolver = Callable[[Any], Any]
-"""Replaces the bulkId references of a raw operation."""
+Resolver = Callable[[BulkOperation], BulkOperation]
+"""Replaces the bulkId references of an operation."""
 
-OperationRunner = Callable[[Any, Resolver], tuple[dict[str, Any], Resource | None]]
-"""Applies a raw operation once resolved, and returns its outcome and the resource it acted on."""
-
-
-def raw_attribute(payload: Any, name: str) -> Any:
-    """Return an attribute of a raw payload, whose names are case insensitive."""
-    if not isinstance(payload, dict):
-        return None
-    return next(
-        (value for key, value in payload.items() if key.casefold() == name.casefold()),
-        None,
-    )
+OperationRunner = Callable[
+    [BulkOperation, Resolver], tuple[dict[str, Any], Resource | None]
+]
+"""Applies an operation once resolved, and returns its outcome and the resource it acted on."""
 
 
 def replace_bulk_ids(value: Any, replace: Callable[[str], str]) -> Any:
-    """Replace every "bulkId:" reference of a raw value."""
+    """Replace every "bulkId:" reference of a value.
+
+    A value without reference is returned as it is. Models are copied with
+    only the changed fields, so the fields the client set stay the same.
+    """
     if isinstance(value, str) and value.startswith(BULK_ID_PREFIX):
         return replace(value.removeprefix(BULK_ID_PREFIX))
+
     if isinstance(value, list):
-        return [replace_bulk_ids(item, replace) for item in value]
+        items = [replace_bulk_ids(item, replace) for item in value]
+        changed = any(new is not old for new, old in zip(items, value, strict=True))
+        return items if changed else value
+
     if isinstance(value, dict):
-        return {key: replace_bulk_ids(item, replace) for key, item in value.items()}
+        entries = {key: replace_bulk_ids(item, replace) for key, item in value.items()}
+        changed = any(entries[key] is not item for key, item in value.items())
+        return entries if changed else value
+
+    if isinstance(value, BaseModel):
+        updates = {}
+        for name in type(value).model_fields:
+            field = getattr(value, name)
+            replaced = replace_bulk_ids(field, replace)
+            if replaced is not field:
+                updates[name] = replaced
+        return value.model_copy(update=updates) if updates else value
+
     return value
 
 
-def resolve_operation(payload: Any, replace: Callable[[str], str]) -> Any:
-    """Replace the "bulkId:" references of the path and the data of a raw bulk operation."""
-    if not isinstance(payload, dict):
-        return payload
+def resolve_operation(
+    operation: BulkOperation, replace: Callable[[str], str]
+) -> BulkOperation:
+    """Replace the "bulkId:" references of the path and the data of a bulk operation."""
+    updates: dict[str, Any] = {}
+    if operation.path is not None:
+        path = "/".join(
+            replace_bulk_ids(segment, replace) for segment in operation.path.split("/")
+        )
+        if path != operation.path:
+            updates["path"] = path
 
-    resolved = {}
-    for key, value in payload.items():
-        if key.casefold() == "path" and isinstance(value, str):
-            value = "/".join(
-                replace_bulk_ids(segment, replace) for segment in value.split("/")
-            )
-        elif key.casefold() == "data":
-            value = replace_bulk_ids(value, replace)
-        resolved[key] = value
-    return resolved
+    data = replace_bulk_ids(operation.data, replace)
+    if data is not operation.data:
+        updates["data"] = data
+
+    return operation.model_copy(update=updates) if updates else operation
 
 
 class BulkJob:
@@ -63,7 +79,7 @@ class BulkJob:
 
     def __init__(
         self,
-        operations: list[Any],
+        operations: list[BulkOperation],
         fail_on_errors: int | None,
         run: OperationRunner,
     ):
@@ -76,10 +92,12 @@ class BulkJob:
         self.errors = 0
 
         self.creations: dict[str, int] = {}
-        for index, payload in enumerate(operations):
-            bulk_id = raw_attribute(payload, "bulkId")
-            if raw_attribute(payload, "method") == "POST" and isinstance(bulk_id, str):
-                self.creations.setdefault(bulk_id, index)
+        for index, operation in enumerate(operations):
+            if (
+                operation.method == BulkOperation.Method.post
+                and operation.bulk_id is not None
+            ):
+                self.creations.setdefault(operation.bulk_id, index)
 
     @property
     def stopped(self) -> bool:
@@ -105,15 +123,15 @@ class BulkJob:
         if index in self.results or index in self.running or self.stopped:
             return
 
-        payload = self.operations[index]
+        operation = self.operations[index]
         self.running.add(index)
-        for bulk_id in self.references(payload):
+        for bulk_id in self.references(operation):
             if bulk_id in self.creations:
                 self.run_operation(self.creations[bulk_id])
 
         if not self.stopped:
             result, resource = self.run_resolved(
-                payload, lambda payload: self.resolve(index, payload)
+                operation, lambda operation: self.resolve(index, operation)
             )
             self.results[index] = result
             if result["status"] >= 400:
@@ -127,7 +145,7 @@ class BulkJob:
         return bulk_id is not None and self.creations.get(bulk_id) == index
 
     @staticmethod
-    def references(payload: Any) -> list[str]:
+    def references(operation: BulkOperation) -> list[str]:
         """Return the bulkIds an operation references."""
         bulk_ids: list[str] = []
 
@@ -135,23 +153,22 @@ class BulkJob:
             bulk_ids.append(bulk_id)
             return bulk_id
 
-        resolve_operation(payload, collect)
+        resolve_operation(operation, collect)
         return bulk_ids
 
-    def resolve(self, index: int, payload: Any) -> Any:
+    def resolve(self, index: int, operation: BulkOperation) -> BulkOperation:
         """Replace the bulkId references of an operation with the identifiers of the created resources.
 
         :raises Conflict: When a referenced resource was not created, as
             RFC 7644 §3.7.1 allows for circular references.
         """
-        bulk_id = raw_attribute(payload, "bulkId")
         if (
-            raw_attribute(payload, "method") == "POST"
-            and isinstance(bulk_id, str)
-            and not self.is_creation(index, bulk_id)
+            operation.method == BulkOperation.Method.post
+            and operation.bulk_id is not None
+            and not self.is_creation(index, operation.bulk_id)
         ):
             raise InvalidValueException(
-                detail=f"The bulkId {bulk_id} is not unique in the request"
+                detail=f"The bulkId {operation.bulk_id} is not unique in the request"
             )
 
         def replace(bulk_id: str) -> str:
@@ -161,4 +178,4 @@ class BulkJob:
                 raise Conflict(f"The bulkId {bulk_id} is part of a circular reference")
             raise Conflict(f"No resource was created with the bulkId {bulk_id}")
 
-        return resolve_operation(payload, replace)
+        return resolve_operation(operation, replace)

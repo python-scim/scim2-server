@@ -140,6 +140,36 @@ class TestBulkOperationErrors:
         assert "location" not in first
         assert second["status"] == "201"
 
+    def test_invalid_data_keeps_the_location_of_its_resource(
+        self, wsgi, first_fake_user
+    ):
+        """RFC 7644 §3.7: only a failed POST answers without a location."""
+        (result,) = bulk(
+            wsgi,
+            [
+                {
+                    "method": "PUT",
+                    "path": f"/Users/{first_fake_user}",
+                    "data": {"userName": 42},
+                }
+            ],
+        ).json()["Operations"]
+        assert result["status"] == "400"
+        assert (
+            result["location"] == f"https://scim.example.com/v2/Users/{first_fake_user}"
+        )
+
+    def test_response_values_sent_by_the_client_are_ignored(self, wsgi):
+        """A client cannot make an operation look like it failed."""
+        operation = {
+            **create_user("rosa"),
+            "status": "400",
+            "response": {"status": "400", "scimType": "mutability"},
+        }
+        (result,) = bulk(wsgi, [operation]).json()["Operations"]
+        assert result["status"] == "201"
+        assert "response" not in result
+
     def test_unknown_resource(self, wsgi):
         """An operation on a missing resource answers 404 with its location."""
         (result,) = bulk(wsgi, [{"method": "DELETE", "path": "/Users/unknown"}]).json()[
@@ -149,11 +179,13 @@ class TestBulkOperationErrors:
         assert result["location"] == "https://scim.example.com/v2/Users/unknown"
 
     def test_unknown_endpoint(self, wsgi):
-        """An operation on an endpoint that serves no resource type answers 404."""
+        """An operation on an endpoint that serves no resource type answers 400 invalidPath."""
         (result,) = bulk(wsgi, [{"method": "DELETE", "path": "/Unknown/x"}]).json()[
             "Operations"
         ]
-        assert result["status"] == "404"
+        assert result["status"] == "400"
+        assert result["response"]["scimType"] == "invalidPath"
+        assert "location" not in result
 
     @pytest.mark.parametrize(
         "operation",
@@ -169,16 +201,22 @@ class TestBulkOperationErrors:
         assert result["status"] == "400"
         assert result["response"]["scimType"] == "invalidValue"
 
-    @pytest.mark.parametrize(
-        "operation",
-        [{"method": "DELETE"}, {"method": "DELETE", "path": 1}, "DELETE"],
-        ids=["missing", "not-a-string", "operation-not-an-object"],
-    )
-    def test_path_is_required(self, wsgi, operation):
+    def test_path_is_required(self, wsgi):
         """RFC 7644 §3.7: the path of an operation is required."""
-        (result,) = bulk(wsgi, [operation]).json()["Operations"]
+        (result,) = bulk(wsgi, [{"method": "DELETE"}]).json()["Operations"]
         assert result["status"] == "400"
         assert result["response"]["detail"] == "path is required for request operations"
+
+    @pytest.mark.parametrize(
+        "operation",
+        [{"method": "DELETE", "path": 1}, "DELETE"],
+        ids=["path-not-a-string", "operation-not-an-object"],
+    )
+    def test_unreadable_operation(self, wsgi, operation):
+        """An operation that cannot be read answers 400, and the other operations still run."""
+        results = bulk(wsgi, [operation, create_user("quinn")]).json()["Operations"]
+        assert [result["status"] for result in results] == ["400", "201"]
+        assert results[0]["response"]["scimType"] == "invalidValue"
 
     @pytest.mark.parametrize("method", ["GET", "post", ["POST"]])
     def test_invalid_method(self, wsgi, method):

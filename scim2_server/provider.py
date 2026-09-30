@@ -47,7 +47,6 @@ from werkzeug.routing.exceptions import RequestRedirect
 from scim2_server.backend import Backend
 from scim2_server.bulk import BulkJob
 from scim2_server.bulk import Resolver
-from scim2_server.bulk import raw_attribute
 from scim2_server.utils import load_default_service_provider_config
 
 SEARCH_REQUEST_PARAMETERS = (
@@ -516,7 +515,10 @@ class SCIMApplication:
                 f"The payload exceeds the maxPayloadSize ({bulk.max_payload_size} bytes)"
             )
 
-        bulk_request, operations = self.read_bulk_request(request.json)
+        bulk_request = BulkRequest[Union[tuple(self.get_models())]].model_validate(  # noqa: UP007
+            request.json, scim_ctx=Context.BULK_REQUEST
+        )
+        operations = cast(list[BulkOperation], bulk_request.operations)
         if bulk.max_operations is not None and len(operations) > bulk.max_operations:
             raise RequestEntityTooLarge(
                 f"The number of operations exceeds the maxOperations ({bulk.max_operations})"
@@ -525,7 +527,9 @@ class SCIMApplication:
         results = BulkJob(
             operations,
             bulk_request.fail_on_errors,
-            lambda payload, resolve: self.run_bulk_operation(request, payload, resolve),
+            lambda operation, resolve: self.run_bulk_operation(
+                request, operation, resolve
+            ),
         ).run()
         return self.make_response(
             BulkResponse[Union[tuple(self.get_models())]](  # noqa: UP007
@@ -533,51 +537,38 @@ class SCIMApplication:
             ).model_dump(scim_ctx=Context.BULK_RESPONSE)
         )
 
-    def read_bulk_request(self, payload: Any) -> tuple[BulkRequest, list[Any]]:
-        """Validate the envelope of a bulk request, and return it with its raw operations.
-
-        Each operation is validated on its own, so an invalid operation only
-        fails itself (RFC 7644 §3.7.3).
-        """
-        key = (
-            next((key for key in payload if key.casefold() == "operations"), None)
-            if isinstance(payload, dict)
-            else None
-        )
-        operations = payload[key] if key else None
-        envelope = {**payload, key: []} if isinstance(operations, list) else payload
-        bulk_request = BulkRequest[Union[tuple(self.get_models())]].model_validate(  # noqa: UP007
-            envelope, scim_ctx=Context.BULK_REQUEST
-        )
-        return bulk_request, cast(list[Any], operations)
-
     def run_bulk_operation(
-        self, request: Request, payload: Any, resolve: Resolver
+        self, request: Request, operation: BulkOperation, resolve: Resolver
     ) -> tuple[dict[str, Any], Resource | None]:
         """Apply one operation of a bulk job.
 
+        An operation that failed its validation keeps its error, once its
+        references are resolved to locate it.
+
         :return: The outcome of the operation, and the resource it created or updated.
         """
-        method = raw_attribute(payload, "method")
-        bulk_id = raw_attribute(payload, "bulkId")
         result: dict[str, Any] = {
-            "method": method
-            if method in [member.value for member in BulkOperation.Method]
-            else None,
-            "bulk_id": bulk_id if isinstance(bulk_id, str) else None,
+            "method": operation.method,
+            "bulk_id": operation.bulk_id,
         }
 
         try:
-            payload = resolve(payload)
-            resource_type, resource_id = self.get_bulk_target(payload)
-            if resource_id:
+            operation = resolve(operation)
+            resource_type = self.get_resource_type_by_endpoint(operation.endpoint or "")
+            if resource_type is not None and operation.resource_id:
                 result["location"] = urljoin(
-                    request.url, f"{resource_type.endpoint.strip('/')}/{resource_id}"
+                    request.url,
+                    f"{resource_type.endpoint.strip('/')}/{operation.resource_id}",
                 )
-            operation = BulkOperation[self.get_model(resource_type)].model_validate(
-                payload, scim_ctx=Context.BULK_REQUEST
+            if isinstance(operation.response, Error):
+                return {
+                    **result,
+                    "status": operation.status,
+                    "response": operation.response,
+                }, None
+            resource = self.apply_bulk_operation(
+                cast(ResourceType, resource_type), operation
             )
-            resource = self.apply_bulk_operation(resource_type, resource_id, operation)
         except Exception as exception:
             error = self.error_from(exception)
             return {**result, "status": error.status, "response": error}, None
@@ -591,34 +582,15 @@ class SCIMApplication:
         result["version"] = resource.meta.version
         return result, resource
 
-    def get_bulk_target(self, payload: Any) -> tuple[ResourceType, str]:
-        """Return the resource type and the resource identifier of a bulk operation path.
-
-        :raises NotFound: When the path does not start with a resource type endpoint.
-        """
-        path = raw_attribute(payload, "path")
-        if not isinstance(path, str):
-            raise InvalidValueException(
-                detail="path is required for request operations"
-            )
-
-        endpoint, _, resource_id = path.lstrip("/").partition("/")
-        resource_type = self.get_resource_type_by_endpoint(endpoint)
-        if resource_type is None:
-            raise NotFound
-        return resource_type, resource_id
-
     def apply_bulk_operation(
-        self,
-        resource_type: ResourceType,
-        resource_id: str,
-        operation: BulkOperation,
+        self, resource_type: ResourceType, operation: BulkOperation
     ) -> Resource | None:
         """Apply a validated bulk operation, and return the resource it acted on.
 
         The data of the operation is already validated, and the resource
         operations take it as it is.
         """
+        resource_id = operation.resource_id
         if (operation.method == BulkOperation.Method.post) == bool(resource_id):
             raise InvalidValueException(
                 detail="A POST path must target a resource type endpoint, other methods a resource"
