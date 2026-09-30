@@ -1,8 +1,15 @@
+import io
+import json
+
 import pytest
 from scim2_models import Bulk
 from scim2_models import ETag
 from scim2_models import Patch
+from scim2_models import ScimProvider
+from werkzeug.test import EnvironBuilder
+from werkzeug.test import run_wsgi_app
 
+from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_service_provider_config
 
 BULK_REQUEST = "urn:ietf:params:scim:api:messages:2.0:BulkRequest"
@@ -386,6 +393,31 @@ class TestBulkRequest:
         r = bulk(client, [create_user("nina")])
         assert r.status_code == 413
         assert r.json()["detail"] == "The payload exceeds the maxPayloadSize (10 bytes)"
+
+    def test_streamed_payload_too_large(self, backend, scim_provider):
+        """A streamed payload beyond maxPayloadSize answers 413, even when its first bytes are valid JSON."""
+        config = load_default_service_provider_config()
+        config.bulk = Bulk(supported=True, max_operations=1000, max_payload_size=100)
+        provider = ScimProvider(
+            models=scim_provider.models,
+            resource_types=scim_provider.resource_types,
+            config=config,
+        )
+        body = json.dumps({"schemas": [BULK_REQUEST], "Operations": []}) + " " * 100
+        environ = EnvironBuilder(
+            path="/v2/Bulk",
+            method="POST",
+            input_stream=io.BytesIO(body.encode()),
+            content_type="application/scim+json",
+        ).get_environ()
+        del environ["CONTENT_LENGTH"]
+        environ["wsgi.input_terminated"] = True
+        response, status, _ = run_wsgi_app(SCIMApplication(backend, provider), environ)
+        assert status == "413 REQUEST ENTITY TOO LARGE"
+        assert (
+            json.loads(b"".join(response))["detail"]
+            == "The payload exceeds the maxPayloadSize (100 bytes)"
+        )
 
     def test_limits_are_optional(self, wsgi_with):
         """A configuration without limits accepts any job."""

@@ -502,18 +502,32 @@ class SCIMApplication:
         if capability is None or not capability.supported:
             raise WerkzeugNotImplemented(f"{operation} is not supported")
 
+    @staticmethod
+    def ensure_payload_size(request: Request, max_payload_size: int):
+        """Refuse with a 413 a payload larger than max_payload_size, without reading more than that.
+
+        :raises RequestEntityTooLarge: When the payload is too large.
+        """
+        # Werkzeug refuses a Content-Length above the limit, but silently cuts a
+        # streamed body at the limit. One extra byte tells a cut body apart.
+        request.max_content_length = max_payload_size + 1
+        try:
+            too_large = len(request.get_data()) > max_payload_size
+        except RequestEntityTooLarge:
+            too_large = True
+
+        if too_large:
+            raise RequestEntityTooLarge(
+                f"The payload exceeds the maxPayloadSize ({max_payload_size} bytes)"
+            )
+
     def call_bulk(self, request: Request, **kwargs) -> Response:
         """Implement the /Bulk endpoint (RFC 7644 §3.7)."""
         self.ensure_supported(self.config.bulk, "Bulk")
         bulk = cast(Bulk, self.config.bulk)
 
-        if (
-            bulk.max_payload_size is not None
-            and len(request.get_data()) > bulk.max_payload_size
-        ):
-            raise RequestEntityTooLarge(
-                f"The payload exceeds the maxPayloadSize ({bulk.max_payload_size} bytes)"
-            )
+        if bulk.max_payload_size is not None:
+            self.ensure_payload_size(request, bulk.max_payload_size)
 
         bulk_request = BulkRequest[Union[tuple(self.get_models())]].model_validate(  # noqa: UP007
             request.json, scim_ctx=Context.BULK_REQUEST
