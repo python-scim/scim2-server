@@ -13,7 +13,7 @@ they are lost once the process exits.
 - [x] Unique Constraints
 - [x] HTTP PATCH (Add/Remove/Replace)
 - [x] Sorting
-- [x] Bulk operations ([RFC 7644, Section 3.7](https://datatracker.ietf.org/doc/html/rfc7644#section-3.7))
+- [x] Bulk operations
 
 ## Usage
 
