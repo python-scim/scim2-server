@@ -112,6 +112,21 @@ class TestProvider:
 
         assert r.status_code == 405
 
+    @pytest.mark.parametrize(
+        ("method", "path", "allowed"),
+        [
+            ("POST", "/v2/Schemas", "GET, HEAD"),
+            ("GET", "/v2/Bulk", "POST"),
+        ],
+    )
+    def test_method_not_allowed_lists_the_supported_methods(
+        self, wsgi, method, path, allowed
+    ):
+        """A 405 answer tells the methods the endpoint supports."""
+        r = wsgi.request(method, path)
+
+        assert r.headers["Allow"] == allowed
+
     def test_unknown_resource_endpoint(self, wsgi):
         """An endpoint that is neither reserved nor served answers 404."""
         r = wsgi.get("/v2/SchemasArchive")

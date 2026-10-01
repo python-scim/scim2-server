@@ -36,6 +36,7 @@ from werkzeug import Response
 from werkzeug.datastructures import ETags
 from werkzeug.exceptions import Forbidden
 from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import MethodNotAllowed
 from werkzeug.exceptions import NotFound
 from werkzeug.exceptions import NotImplemented as WerkzeugNotImplemented
 from werkzeug.exceptions import PreconditionFailed
@@ -828,7 +829,11 @@ class SCIMApplication:
             self.log.exception(e)
             return e.get_response(environ)
         except Exception as e:
-            return self.make_error(self.error_from(e))
+            response = self.make_error(self.error_from(e))
+            if isinstance(e, MethodNotAllowed) and e.valid_methods:
+                # RFC 9110 §15.5.6: a 405 answer lists the supported methods.
+                response.headers["Allow"] = ", ".join(sorted(e.valid_methods))
+            return response
 
     def __call__(
         self, environ: "WSGIEnvironment", start_response: "StartResponse"
