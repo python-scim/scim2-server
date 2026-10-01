@@ -43,6 +43,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.exceptions import Unauthorized
 from werkzeug.http import parse_etags
 from werkzeug.http import unquote_etag
+from werkzeug.routing import BaseConverter
 from werkzeug.routing import Map
 from werkzeug.routing import Rule
 from werkzeug.routing.exceptions import RequestRedirect
@@ -77,6 +78,20 @@ BULK_SUCCESS_STATUS = {
     BulkOperation.Method.patch: 200,
     BulkOperation.Method.delete: 204,
 }
+
+
+class ResourceEndpointConverter(BaseConverter):
+    """Match a resource endpoint, but not the endpoints RFC 7644 reserves nor the version prefix.
+
+    A request with a method a reserved endpoint does not support then gets a
+    405 answer, instead of being routed to a resource type of that name.
+    """
+
+    # A reserved name followed by the end of the path segment is refused.
+    regex = (
+        r"(?!(?:ServiceProviderConfig|ResourceTypes|Schemas|Bulk|Me|v2)(?![^/]))[^/]+"
+    )
+    part_isolating = True
 
 
 class SCIMApplication:
@@ -123,17 +138,17 @@ class SCIMApplication:
                     methods=("GET", "POST", "PUT", "PATCH", "DELETE"),
                 ),
                 Rule(
-                    f"{prefix}/<string:resource_endpoint>",
+                    f"{prefix}/<resource_endpoint:resource_endpoint>",
                     endpoint="resource",
                     methods=("GET", "POST"),
                 ),
                 Rule(
-                    f"{prefix}/<string:resource_endpoint>/.search",
+                    f"{prefix}/<resource_endpoint:resource_endpoint>/.search",
                     endpoint="resource_search",
                     methods=("POST",),
                 ),
                 Rule(
-                    f"{prefix}/<string:resource_endpoint>/<string:resource_id>",
+                    f"{prefix}/<resource_endpoint:resource_endpoint>/<string:resource_id>",
                     endpoint="single_resource",
                     methods=("GET", "PUT", "PATCH", "DELETE"),
                 ),
@@ -148,7 +163,9 @@ class SCIMApplication:
             for prefix in ("", "/v2")
         )
 
-        self.url_map = Map(rules)
+        self.url_map = Map(
+            rules, converters={"resource_endpoint": ResourceEndpointConverter}
+        )
 
     def get_model(self, resource_type: ResourceType) -> type[Resource[Any]]:
         """Return the model of a resource type, its extensions included."""

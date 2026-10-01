@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import pytest
 from scim2_models import Context
 from werkzeug.exceptions import HTTPException
 
@@ -91,3 +92,28 @@ class TestProvider:
             r = wsgi.get("/v2/ServiceProviderConfig")
 
         assert r.status_code == 500
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("POST", "/v2/ServiceProviderConfig"),
+            ("POST", "/v2/ResourceTypes"),
+            ("POST", "/v2/Schemas"),
+            ("PUT", "/v2/Schemas"),
+            ("POST", "/Schemas"),
+            ("PUT", "/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User"),
+            ("DELETE", "/v2/ResourceTypes/User"),
+            ("GET", "/v2/Bulk"),
+        ],
+    )
+    def test_unsupported_method_on_a_reserved_endpoint(self, wsgi, method, path):
+        """A method a reserved endpoint does not support answers 405."""
+        r = wsgi.request(method, path)
+
+        assert r.status_code == 405
+
+    def test_unknown_resource_endpoint(self, wsgi):
+        """An endpoint that is neither reserved nor served answers 404."""
+        r = wsgi.get("/v2/SchemasArchive")
+
+        assert r.status_code == 404
