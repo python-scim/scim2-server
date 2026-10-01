@@ -1,7 +1,10 @@
 import itertools
 import json
 import logging
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 from typing import Any
+from typing import TypeVar
 from typing import Union
 from typing import cast
 from urllib.parse import urljoin
@@ -48,6 +51,11 @@ from scim2_server.backend import Backend
 from scim2_server.bulk import BulkJob
 from scim2_server.bulk import Resolver
 from scim2_server.utils import load_default_service_provider_config
+from scim2_server.utils import parametrize
+
+if TYPE_CHECKING:
+    from _typeshed.wsgi import StartResponse
+    from _typeshed.wsgi import WSGIEnvironment
 
 SEARCH_REQUEST_PARAMETERS = (
     "attributes",
@@ -57,6 +65,10 @@ SEARCH_REQUEST_PARAMETERS = (
     "sortOrder",
     "startIndex",
     "count",
+)
+
+DiscoveryResourceT = TypeVar(
+    "DiscoveryResourceT", ResourceType, Schema, ServiceProviderConfig
 )
 
 BULK_SUCCESS_STATUS = {
@@ -71,7 +83,7 @@ class SCIMApplication:
     """A WSGI application implementing a SCIM provider (server)."""
 
     def __init__(self, backend: Backend, provider: ScimProvider):
-        self.bearer_tokens = set()
+        self.bearer_tokens: set[str] = set()
         self.backend = backend
         self.provider = provider
         self.config = provider.config or load_default_service_provider_config()
@@ -138,11 +150,11 @@ class SCIMApplication:
 
         self.url_map = Map(rules)
 
-    def get_model(self, resource_type: ResourceType) -> type[Resource]:
+    def get_model(self, resource_type: ResourceType) -> type[Resource[Any]]:
         """Return the model of a resource type, its extensions included."""
-        return cast(type[Resource], self.provider.model_for(resource_type))
+        return cast(type[Resource[Any]], self.provider.model_for(resource_type))
 
-    def get_models(self) -> list[type[Resource]]:
+    def get_models(self) -> list[type[Resource[Any]]]:
         """Return the models of every resource type."""
         return [self.get_model(rt) for rt in self.provider.resource_types]
 
@@ -152,7 +164,7 @@ class SCIMApplication:
             (
                 resource_type
                 for resource_type in self.provider.resource_types
-                if resource_type.endpoint.lstrip("/").casefold()
+                if (resource_type.endpoint or "").lstrip("/").casefold()
                 == endpoint.lstrip("/").casefold()
             ),
             None,
@@ -163,12 +175,13 @@ class SCIMApplication:
         """Whether the configuration declares the resources versioned with ETags."""
         return bool(self.config.etag and self.config.etag.supported)
 
-    def publish(self, request: Request, resource: Resource) -> Resource:
+    def publish(self, request: Request, resource: Resource[Any]) -> Resource[Any]:
         """Return a copy of a resource in the form sent to the client.
 
         Its location is made absolute from the URL the client requested, and
         its version is left out when the service does not support ETags.
         """
+        assert resource.meta is not None
         update: dict[str, Any] = {
             "location": urljoin(request.url + "/", resource.meta.location)
         }
@@ -179,13 +192,14 @@ class SCIMApplication:
         )
 
     @staticmethod
-    def etag_header(resource: Resource) -> dict[str, str]:
+    def etag_header(resource: Resource[Any]) -> dict[str, str]:
         """Return the ETag header of a published resource, if it has a version."""
+        assert resource.meta is not None
         return {"ETag": resource.meta.version} if resource.meta.version else {}
 
     def check_preconditions(
         self,
-        resource: Resource,
+        resource: Resource[Any],
         method: str,
         if_match: ETags | None = None,
         if_none_match: ETags | None = None,
@@ -199,11 +213,13 @@ class SCIMApplication:
         :return: :data:`False` when a GET should answer 304 Not Modified.
         :raises PreconditionFailed: When the method must not be performed.
         """
+        assert resource.meta is not None
         # A service that does not support ETags has no tag to match: RFC 7232
         # §3.1 fails an If-Match listing tags, and lets "*" pass.
         version, _ = (
             unquote_etag(resource.meta.version) if self.etag_supported else (None, None)
         )
+        version = version or ""
         # RFC 7232 §3.1 compares If-Match strongly, which would never match
         # the weak ETags RFC 7644 §3.14 recommends and sends in its example.
         if if_match and not if_match.contains_weak(version):
@@ -218,7 +234,7 @@ class SCIMApplication:
 
     def get_existing_resource(
         self, resource_type: ResourceType, resource_id: str
-    ) -> Resource:
+    ) -> Resource[Any]:
         """Return a stored resource.
 
         :raises NotFound: When no resource of this type has this identifier.
@@ -228,7 +244,7 @@ class SCIMApplication:
             raise NotFound
         return resource
 
-    def create(self, resource_type: ResourceType, payload: Any) -> Resource:
+    def create(self, resource_type: ResourceType, payload: Any) -> Resource[Any]:
         """Validate a creation payload and store the new resource."""
         resource = self.get_model(resource_type).model_validate(
             payload, scim_ctx=Context.RESOURCE_CREATION_REQUEST
@@ -242,7 +258,7 @@ class SCIMApplication:
         payload: Any,
         if_match: ETags | None = None,
         if_none_match: ETags | None = None,
-    ) -> Resource:
+    ) -> Resource[Any]:
         """Replace a stored resource with a payload and return the stored result."""
         resource = self.get_existing_resource(resource_type, resource_id)
         self.check_preconditions(resource, "PUT", if_match, if_none_match)
@@ -253,7 +269,7 @@ class SCIMApplication:
         # A PUT that changes nothing keeps meta.lastModified and the ETag.
         if not replacement.replace(resource):
             return resource
-        return self.backend.update_resource(resource_type, replacement)
+        return self.update(resource_type, replacement)
 
     def patch(
         self,
@@ -262,17 +278,31 @@ class SCIMApplication:
         payload: Any,
         if_match: ETags | None = None,
         if_none_match: ETags | None = None,
-    ) -> Resource:
+    ) -> Resource[Any]:
         """Apply a PATCH payload to a stored resource and return the stored result."""
         self.ensure_supported(self.config.patch, "PATCH")
-        patch_operation = PatchOp[self.get_model(resource_type)].model_validate(payload)
+        patch_operation = parametrize(
+            PatchOp, self.get_model(resource_type)
+        ).model_validate(payload)
         resource = self.get_existing_resource(resource_type, resource_id)
         self.check_preconditions(resource, "PATCH", if_match, if_none_match)
 
         # A PATCH that changes nothing keeps meta.lastModified and the ETag.
         if not patch_operation.patch(resource):
             return resource
-        return self.backend.update_resource(resource_type, resource)
+        return self.update(resource_type, resource)
+
+    def update(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        """Store an updated resource and return the stored result.
+
+        :raises NotFound: When the backend no longer has the resource.
+        """
+        updated = self.backend.update_resource(resource_type, resource)
+        if updated is None:
+            raise NotFound
+        return updated
 
     def delete(
         self,
@@ -287,7 +317,7 @@ class SCIMApplication:
         self.backend.delete_resource(resource_type, resource_id)
 
     def call_single_resource(
-        self, request: Request, resource_endpoint: str, resource_id: str, **kwargs
+        self, request: Request, resource_endpoint: str, resource_id: str, **kwargs: Any
     ) -> Response:
         resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
@@ -369,10 +399,10 @@ class SCIMApplication:
 
     @staticmethod
     def get_response_parameters(
-        request: Request, model: type[Resource]
-    ) -> ResponseParameters:
+        request: Request, model: type[Resource[Any]]
+    ) -> ResponseParameters[Any]:
         """Parse the "attributes" and "excludedAttributes" HTTP request parameters."""
-        return ResponseParameters[model].model_validate(
+        return parametrize(ResponseParameters, model).model_validate(
             {
                 key: request.args[key]
                 for key in ("attributes", "excludedAttributes")
@@ -381,8 +411,8 @@ class SCIMApplication:
         )
 
     def build_search_request(
-        self, request: Request, models: list[type[Resource]]
-    ) -> SearchRequest:
+        self, request: Request, models: list[type[Resource[Any]]]
+    ) -> SearchRequest[Any]:
         """Construct a SearchRequest object from a werkzeug request.
 
         :param request: werkzeug request
@@ -410,9 +440,10 @@ class SCIMApplication:
         if parameters & {"sortby", "sortorder"}:
             self.ensure_supported(self.config.sort, "Sorting")
 
-        search_request = SearchRequest[Union[tuple(models)]].model_validate(  # noqa: UP007
-            payload, scim_ctx=Context.SEARCH_REQUEST
-        )
+        search_request = parametrize(
+            SearchRequest,
+            Union[tuple(models)],  # noqa: UP007
+        ).model_validate(payload, scim_ctx=Context.SEARCH_REQUEST)
         search_request.start_index = search_request.start_index or 1
         max_results = self.config.filter.max_results if self.config.filter else None
         if max_results is not None and (
@@ -421,7 +452,9 @@ class SCIMApplication:
             search_request.count = max_results
         return search_request
 
-    def query_resource(self, request: Request, resource: ResourceType | None):
+    def query_resource(
+        self, request: Request, resource: ResourceType | None
+    ) -> ListResponse[Resource[Any]]:
         models = self.get_models() if resource is None else [self.get_model(resource)]
         search_request = self.build_search_request(request, models)
 
@@ -438,7 +471,7 @@ class SCIMApplication:
             for s in results
         ]
 
-        return ListResponse[Union[tuple(self.get_models())]](  # noqa: UP007
+        return parametrize(ListResponse, Union[tuple(self.get_models())])(  # noqa: UP007
             total_results=total_results,
             items_per_page=len(resources),
             start_index=search_request.start_index,
@@ -446,7 +479,7 @@ class SCIMApplication:
         )
 
     def call_resource(
-        self, request: Request, resource_endpoint: str, **kwargs
+        self, request: Request, resource_endpoint: str, **kwargs: Any
     ) -> Response:
         resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
@@ -463,6 +496,7 @@ class SCIMApplication:
                 created_resource = self.publish(
                     request, self.create(resource_type, request.json)
                 )
+                assert created_resource.meta is not None
                 return self.make_response(
                     created_resource.model_dump(
                         scim_ctx=Context.RESOURCE_CREATION_RESPONSE
@@ -471,7 +505,7 @@ class SCIMApplication:
                     headers={"Location": created_resource.meta.location},
                 )
 
-    def call_query_all(self, request: Request, **kwargs) -> Response:
+    def call_query_all(self, request: Request, **kwargs: Any) -> Response:
         return self.make_response(
             self.query_resource(request, None).model_dump(
                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
@@ -479,7 +513,7 @@ class SCIMApplication:
         )
 
     def call_resource_search(
-        self, request: Request, resource_endpoint: str, **kwargs
+        self, request: Request, resource_endpoint: str, **kwargs: Any
     ) -> Response:
         resource_type = self.get_resource_type_by_endpoint(resource_endpoint)
         if not resource_type:
@@ -493,7 +527,7 @@ class SCIMApplication:
     @staticmethod
     def ensure_supported(
         capability: Patch | Bulk | Filter | Sort | None, operation: str
-    ):
+    ) -> None:
         """Refuse with a 501 an operation the configuration does not declare supported.
 
         RFC 7644 §3.12 answers 501 when the service provider does not support
@@ -503,7 +537,7 @@ class SCIMApplication:
             raise WerkzeugNotImplemented(f"{operation} is not supported")
 
     @staticmethod
-    def ensure_payload_size(request: Request, max_payload_size: int):
+    def ensure_payload_size(request: Request, max_payload_size: int) -> None:
         """Refuse with a 413 a payload larger than max_payload_size, without reading more than that.
 
         :raises RequestEntityTooLarge: When the payload is too large.
@@ -521,7 +555,7 @@ class SCIMApplication:
                 f"The payload exceeds the maxPayloadSize ({max_payload_size} bytes)"
             )
 
-    def call_bulk(self, request: Request, **kwargs) -> Response:
+    def call_bulk(self, request: Request, **kwargs: Any) -> Response:
         """Implement the /Bulk endpoint (RFC 7644 §3.7)."""
         self.ensure_supported(self.config.bulk, "Bulk")
         bulk = cast(Bulk, self.config.bulk)
@@ -529,10 +563,11 @@ class SCIMApplication:
         if bulk.max_payload_size is not None:
             self.ensure_payload_size(request, bulk.max_payload_size)
 
-        bulk_request = BulkRequest[Union[tuple(self.get_models())]].model_validate(  # noqa: UP007
-            request.json, scim_ctx=Context.BULK_REQUEST
-        )
-        operations = cast(list[BulkOperation], bulk_request.operations)
+        bulk_request = parametrize(
+            BulkRequest,
+            Union[tuple(self.get_models())],  # noqa: UP007
+        ).model_validate(request.json, scim_ctx=Context.BULK_REQUEST)
+        operations = cast(list[BulkOperation[Resource[Any]]], bulk_request.operations)
         if bulk.max_operations is not None and len(operations) > bulk.max_operations:
             raise RequestEntityTooLarge(
                 f"The number of operations exceeds the maxOperations ({bulk.max_operations})"
@@ -546,14 +581,17 @@ class SCIMApplication:
             ),
         ).run()
         return self.make_response(
-            BulkResponse[Union[tuple(self.get_models())]](  # noqa: UP007
-                operations=results
-            ).model_dump(scim_ctx=Context.BULK_RESPONSE)
+            parametrize(BulkResponse, Union[tuple(self.get_models())])  # noqa: UP007
+            .model_validate({"operations": results})
+            .model_dump(scim_ctx=Context.BULK_RESPONSE)
         )
 
     def run_bulk_operation(
-        self, request: Request, operation: BulkOperation, resolve: Resolver
-    ) -> tuple[dict[str, Any], Resource | None]:
+        self,
+        request: Request,
+        operation: BulkOperation[Resource[Any]],
+        resolve: Resolver,
+    ) -> tuple[dict[str, Any], Resource[Any] | None]:
         """Apply one operation of a bulk job.
 
         An operation that failed its validation keeps its error, once its
@@ -570,6 +608,7 @@ class SCIMApplication:
             operation = resolve(operation)
             resource_type = self.get_resource_type_by_endpoint(operation.endpoint or "")
             if resource_type is not None and operation.resource_id:
+                assert resource_type.endpoint is not None
                 result["location"] = urljoin(
                     request.url,
                     f"{resource_type.endpoint.strip('/')}/{operation.resource_id}",
@@ -587,18 +626,20 @@ class SCIMApplication:
             error = self.error_from(exception)
             return {**result, "status": error.status, "response": error}, None
 
+        assert operation.method is not None
         result["status"] = BULK_SUCCESS_STATUS[operation.method]
         if resource is None:
             return result, None
 
         resource = self.publish(request, resource)
+        assert resource.meta is not None
         result["location"] = resource.meta.location
         result["version"] = resource.meta.version
         return result, resource
 
     def apply_bulk_operation(
-        self, resource_type: ResourceType, operation: BulkOperation
-    ) -> Resource | None:
+        self, resource_type: ResourceType, operation: BulkOperation[Resource[Any]]
+    ) -> Resource[Any] | None:
         """Apply a validated bulk operation, and return the resource it acted on.
 
         The data of the operation is already validated, and the resource
@@ -610,10 +651,11 @@ class SCIMApplication:
                 detail="A POST path must target a resource type endpoint, other methods a resource"
             )
 
+        if operation.method == BulkOperation.Method.post or resource_id is None:
+            return self.create(resource_type, operation.data)
+
         if_match = parse_etags(operation.version) if operation.version else None
         match operation.method:
-            case BulkOperation.Method.post:
-                return self.create(resource_type, operation.data)
             case BulkOperation.Method.put:
                 return self.replace(
                     resource_type, resource_id, operation.data, if_match
@@ -624,7 +666,7 @@ class SCIMApplication:
                 self.delete(resource_type, resource_id, if_match)
                 return None
 
-    def call_me(self, request: Request, **kwargs):
+    def call_me(self, request: Request, **kwargs: Any) -> Response:
         """Implement the /Me endpoint.
 
         RFC 7644, Section 3.11 allows raising a 501 (Not Implemented) if
@@ -632,14 +674,14 @@ class SCIMApplication:
         """
         raise WerkzeugNotImplemented
 
-    def register_bearer_token(self, token: str):
+    def register_bearer_token(self, token: str) -> None:
         """Register a static bearer token for authentication.
 
         :param token: Bearer token
         """
         self.bearer_tokens.add(token)
 
-    def check_auth(self, request: Request):
+    def check_auth(self, request: Request) -> None:
         """Check the authorization headers."""
         if not self.bearer_tokens:
             return
@@ -650,7 +692,7 @@ class SCIMApplication:
             raise Unauthorized
 
     @staticmethod
-    def make_response(content, status=200, **kwargs) -> Response:
+    def make_response(content: Any, status: int = 200, **kwargs: Any) -> Response:
         """Construct a werkzeug response from any JSON-serializable content."""
         etag = None
         if content is not None:
@@ -681,17 +723,17 @@ class SCIMApplication:
             case _:
                 return Error(status=500, detail="Internal server error")
 
-    def make_error(self, error: Error):
+    def make_error(self, error: Error) -> Response:
         """Construct a werkzeug response from a SCIM Error."""
-        return self.make_response(error.model_dump(), status=int(error.status))
+        return self.make_response(error.model_dump(), status=int(error.status or 500))
 
     @staticmethod
-    def forbid_filter(request: Request):
+    def forbid_filter(request: Request) -> None:
         """RFC 7644, Section 4: "If a "filter" is provided, the service provider SHOULD respond with HTTP status code 403 (Forbidden)"."""
         if "filter" in request.args:
             raise Forbidden
 
-    def call_service_provider_config(self, request: Request, **kwargs):
+    def call_service_provider_config(self, request: Request, **kwargs: Any) -> Response:
         """Return the ServiceProviderConfig."""
         self.forbid_filter(request)
         return self.make_response(
@@ -699,12 +741,14 @@ class SCIMApplication:
         )
 
     @staticmethod
-    def locate(resource: ResourceType | Schema | ServiceProviderConfig, location: str):
+    def locate(resource: DiscoveryResourceT, location: str) -> DiscoveryResourceT:
         """Return a copy of a discovery resource carrying its meta."""
         meta = Meta(resource_type=type(resource).__name__, location=location)
         return resource.model_copy(update={"meta": meta})
 
-    def call_resource_type(self, request: Request, resource_type: str, **kwargs):
+    def call_resource_type(
+        self, request: Request, resource_type: str, **kwargs: Any
+    ) -> Response:
         """Return a single resource type."""
         self.forbid_filter(request)
         for res in self.provider.resource_types:
@@ -714,7 +758,7 @@ class SCIMApplication:
                 )
         raise NotFound
 
-    def call_schema(self, request: Request, schema_id: str):
+    def call_schema(self, request: Request, schema_id: str) -> Response:
         """Return a single schema."""
         self.forbid_filter(request)
         for res in self.provider.schemas:
@@ -724,7 +768,7 @@ class SCIMApplication:
                 )
         raise NotFound
 
-    def call_resource_types(self, request: Request, **kwargs):
+    def call_resource_types(self, request: Request, **kwargs: Any) -> Response:
         """Return a ListResponse of all known resource types."""
         self.forbid_filter(request)
         results = self.provider.resource_types
@@ -736,7 +780,7 @@ class SCIMApplication:
         ).model_dump()
         return self.make_response(resp)
 
-    def call_schemas(self, request: Request, **kwargs):
+    def call_schemas(self, request: Request, **kwargs: Any) -> Response:
         """Return a ListResponse of all known schemas."""
         self.forbid_filter(request)
         results = self.provider.schemas
@@ -748,7 +792,7 @@ class SCIMApplication:
         ).model_dump()
         return self.make_response(resp)
 
-    def wsgi_app(self, request: Request, environ):
+    def wsgi_app(self, request: Request, environ: "WSGIEnvironment") -> Response:
         try:
             urls = self.url_map.bind_to_environ(environ)
             endpoint, args = urls.match()
@@ -760,7 +804,7 @@ class SCIMApplication:
             # Wrap the entire call in a transaction. Should probably be optimized (use transaction only when necessary).
             # The provider makes its policy the one every payload is read under.
             with self.provider, self.backend:
-                response = getattr(self, f"call_{endpoint}")(request, **args)
+                response: Response = getattr(self, f"call_{endpoint}")(request, **args)
             return response
         except RequestRedirect as e:
             # urls.match may cause a redirect, handle it as a special case of HTTPException
@@ -769,7 +813,9 @@ class SCIMApplication:
         except Exception as e:
             return self.make_error(self.error_from(e))
 
-    def __call__(self, environ, start_response):
+    def __call__(
+        self, environ: "WSGIEnvironment", start_response: "StartResponse"
+    ) -> Iterable[bytes]:
         """Return the actual WSGI server implementation."""
         if environ.get("PATH_INFO", "").endswith(".scim"):
             # RFC 7644, Section 3.8

@@ -15,6 +15,15 @@ repos:
       - id: end-of-file-fixer
         exclude: "\\.svg$|\\.map$|\\.min\\.css$|\\.min\\.js$|\\.po$|\\.pot$"
       - id: check-toml
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run --all-extras mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        require_serial: true
   - repo: https://github.com/codespell-project/codespell
     rev: 57b21406f092110c18776e39b0bda50d37c945c8  # frozen: v2.4.3
     hooks:

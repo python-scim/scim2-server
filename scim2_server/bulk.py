@@ -9,11 +9,12 @@ from werkzeug.exceptions import Conflict
 
 BULK_ID_PREFIX = "bulkId:"
 
-Resolver = Callable[[BulkOperation], BulkOperation]
+Resolver = Callable[[BulkOperation[Resource[Any]]], BulkOperation[Resource[Any]]]
 """Replaces the bulkId references of an operation."""
 
 OperationRunner = Callable[
-    [BulkOperation, Resolver], tuple[dict[str, Any], Resource | None]
+    [BulkOperation[Resource[Any]], Resolver],
+    tuple[dict[str, Any], Resource[Any] | None],
 ]
 """Applies an operation once resolved, and returns its outcome and the resource it acted on."""
 
@@ -50,8 +51,8 @@ def replace_bulk_ids(value: Any, replace: Callable[[str], str]) -> Any:
 
 
 def resolve_operation(
-    operation: BulkOperation, replace: Callable[[str], str]
-) -> BulkOperation:
+    operation: BulkOperation[Resource[Any]], replace: Callable[[str], str]
+) -> BulkOperation[Resource[Any]]:
     """Replace the "bulkId:" references of the path and the data of a bulk operation."""
     updates: dict[str, Any] = {}
     if operation.path is not None:
@@ -79,7 +80,7 @@ class BulkJob:
 
     def __init__(
         self,
-        operations: list[BulkOperation],
+        operations: list[BulkOperation[Resource[Any]]],
         fail_on_errors: int | None,
         run: OperationRunner,
     ):
@@ -87,7 +88,7 @@ class BulkJob:
         self.operations = operations
         self.fail_on_errors = fail_on_errors
         self.results: dict[int, dict[str, Any]] = {}
-        self.created: dict[str, Resource] = {}
+        self.created: dict[str, Resource[Any]] = {}
         self.running: set[int] = set()
         self.errors = 0
 
@@ -145,7 +146,7 @@ class BulkJob:
         return bulk_id is not None and self.creations.get(bulk_id) == index
 
     @staticmethod
-    def references(operation: BulkOperation) -> list[str]:
+    def references(operation: BulkOperation[Resource[Any]]) -> list[str]:
         """Return the bulkIds an operation references."""
         bulk_ids: list[str] = []
 
@@ -156,7 +157,9 @@ class BulkJob:
         resolve_operation(operation, collect)
         return bulk_ids
 
-    def resolve(self, index: int, operation: BulkOperation) -> BulkOperation:
+    def resolve(
+        self, index: int, operation: BulkOperation[Resource[Any]]
+    ) -> BulkOperation[Resource[Any]]:
         """Replace the bulkId references of an operation with the identifiers of the created resources.
 
         :raises Conflict: When a referenced resource was not created, as

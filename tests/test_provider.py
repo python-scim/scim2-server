@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from scim2_models import Context
+from werkzeug.exceptions import HTTPException
 
 
 class TestProvider:
@@ -51,3 +52,42 @@ class TestProvider:
             assert response.status_code == 500
             assert response.json["detail"] == "Internal server error"
             assert "Traceback" not in response.get_data(as_text=True)
+
+    def test_replace_resource_lost_by_the_backend(self, app, wsgi, first_fake_user):
+        """A PUT answers 404 when the backend no longer has the resource to update."""
+        with patch.object(app.backend, "update_resource", return_value=None):
+            r = wsgi.put(
+                f"/v2/Users/{first_fake_user}",
+                json={
+                    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                    "userName": "replaced",
+                },
+            )
+
+        assert r.status_code == 404
+
+    def test_patch_resource_lost_by_the_backend(self, app, wsgi, first_fake_user):
+        """A PATCH answers 404 when the backend no longer has the resource to update."""
+        with patch.object(app.backend, "update_resource", return_value=None):
+            r = wsgi.patch(
+                f"/v2/Users/{first_fake_user}",
+                json={
+                    "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                    "Operations": [
+                        {"op": "replace", "path": "displayName", "value": "patched"}
+                    ],
+                },
+            )
+
+        assert r.status_code == 404
+
+    def test_http_exception_without_status_code(self, app, wsgi):
+        """An HTTP exception without status code answers 500."""
+        with patch.object(
+            app,
+            "call_service_provider_config",
+            side_effect=HTTPException("Something went wrong"),
+        ):
+            r = wsgi.get("/v2/ServiceProviderConfig")
+
+        assert r.status_code == 500

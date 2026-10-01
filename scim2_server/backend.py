@@ -2,7 +2,9 @@ import datetime
 import pickle
 import uuid
 from threading import Lock
+from types import TracebackType
 from typing import Any
+from typing import Self
 from typing import Union
 from typing import cast
 
@@ -17,6 +19,8 @@ from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 from werkzeug.http import generate_etag
 
+from scim2_server.utils import parametrize
+
 
 class Backend:
     """The base class for a SCIM provider backend.
@@ -25,22 +29,27 @@ class Backend:
     :class:`~scim2_models.ScimProvider` of the application.
     """
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Allow the backend to be used as a context manager.
 
         This enables support for transactions.
         """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Exit the transaction."""
         pass
 
     def query_resources(
         self,
-        search_request: SearchRequest,
+        search_request: SearchRequest[Any],
         resource_type: ResourceType | None = None,
-    ) -> tuple[int, list[Resource]]:
+    ) -> tuple[int, list[Resource[Any]]]:
         """Query the backend for a set of resources.
 
         :param search_request: SearchRequest instance describing the
@@ -59,7 +68,7 @@ class Backend:
 
     def get_resource(
         self, resource_type: ResourceType, object_id: str
-    ) -> Resource | None:
+    ) -> Resource[Any] | None:
         """Query the backend for a resources by its ID.
 
         :param resource_type: The resource type to get the object from.
@@ -81,8 +90,8 @@ class Backend:
         raise NotImplementedError
 
     def create_resource(
-        self, resource_type: ResourceType, resource: Resource
-    ) -> Resource | None:
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
         """Create a resource.
 
         :param resource_type: The resource type to create.
@@ -94,15 +103,15 @@ class Backend:
         raise NotImplementedError
 
     def update_resource(
-        self, resource_type: ResourceType, resource: Resource
-    ) -> Resource | None:
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any] | None:
         """Update a resource. The resource is identified by its ID.
 
         :param resource_type: The resource type to update.
         :param resource: Resource to update.
-        :return: The updated resource. Updating should update the
-            "meta.lastModified" data. May be the same object that is
-            passed in.
+        :return: The updated resource, or None if no resource has its ID.
+            Updating should update the "meta.lastModified" data. May be
+            the same object that is passed in.
         """
         raise NotImplementedError
 
@@ -116,12 +125,12 @@ class InMemoryBackend(Backend):
     implementation simple.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.resources: list[Resource] = []
+        self.resources: list[Resource[Any]] = []
         self.lock: Lock = Lock()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """See super docs.
 
         The InMemoryBackend uses a simple Lock to synchronize all
@@ -131,15 +140,20 @@ class InMemoryBackend(Backend):
         self.lock.acquire()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         super().__exit__(exc_type, exc_val, exc_tb)
         self.lock.release()
 
     def query_resources(
         self,
-        search_request: SearchRequest,
+        search_request: SearchRequest[Any],
         resource_type: ResourceType | None = None,
-    ) -> tuple[int, list[Resource]]:
+    ) -> tuple[int, list[Resource[Any]]]:
         start_index = (search_request.start_index or 1) - 1
 
         candidates = [
@@ -151,7 +165,7 @@ class InMemoryBackend(Backend):
         scim_filter = search_request.filter
         if scim_filter is not None and not scim_filter.models and candidates:
             models = tuple(dict.fromkeys(type(r) for r in candidates))
-            scim_filter = ScimFilter[Union[models]](str(scim_filter))  # noqa: UP007
+            scim_filter = parametrize(ScimFilter, Union[models])(str(scim_filter))  # noqa: UP007
 
         found_resources = [
             r for r in candidates if scim_filter is None or scim_filter.match(r)
@@ -165,16 +179,17 @@ class InMemoryBackend(Backend):
             found_resources = found_resources[: search_request.count]
         return total_results, found_resources
 
-    def _is_of_type(self, resource: Resource, resource_type: ResourceType) -> bool:
+    def _is_of_type(self, resource: Resource[Any], resource_type: ResourceType) -> bool:
         """Tell whether a resource belongs to a resource type.
 
         RFC 7643 §3.1 has meta.resourceType carry the name of the resource type,
         which may differ from its id.
         """
+        assert resource.meta is not None
         return resource.meta.resource_type == resource_type.name
 
     def _get_resource_idx(
-        self, resource_type: ResourceType, object_id: str
+        self, resource_type: ResourceType, object_id: str | None
     ) -> int | None:
         return next(
             (
@@ -187,7 +202,7 @@ class InMemoryBackend(Backend):
 
     def get_resource(
         self, resource_type: ResourceType, object_id: str
-    ) -> Resource | None:
+    ) -> Resource[Any] | None:
         resource_dict_idx = self._get_resource_idx(resource_type, object_id)
         if resource_dict_idx is not None:
             return self.resources[resource_dict_idx].model_copy(deep=True)
@@ -205,11 +220,12 @@ class InMemoryBackend(Backend):
         return False
 
     def create_resource(
-        self, resource_type: ResourceType, resource: Resource
-    ) -> Resource | None:
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
         resource = resource.model_copy(deep=True)
         resource.id = uuid.uuid4().hex
         utcnow = datetime.datetime.now(datetime.UTC)
+        assert resource_type.endpoint is not None
         resource.meta = Meta(
             resource_type=resource_type.name,
             created=utcnow,
@@ -221,14 +237,14 @@ class InMemoryBackend(Backend):
         self.resources.append(resource)
         return resource
 
-    def _check_uniqueness(self, resource: Resource):
+    def _check_uniqueness(self, resource: Resource[Any]) -> None:
         """Refuse a resource sharing a unique value with another one of the same schema.
 
         RFC 7643 erratum 8279 scopes the uniqueness to the resources using the
         schema that declares the attribute, whatever their resource type. A
         missing value never clashes, as a SQL NULL does not.
         """
-        unique_paths = Path[type(resource)].iter_paths(
+        unique_paths = parametrize(Path, type(resource)).iter_paths(
             include_subattributes=False,
             uniqueness=[Uniqueness.server, Uniqueness.global_],
         )
@@ -245,30 +261,35 @@ class InMemoryBackend(Backend):
                     raise UniquenessException()
 
     @staticmethod
-    def _unique_value(resource: Resource, attribute: AttributeBinding) -> Any:
+    def _unique_value(resource: Resource[Any], attribute: AttributeBinding) -> Any:
         """Return the value a resource holds for a unique attribute, in the form it is compared in.
 
         A resource whose schemas do not declare the attribute holds no value.
         """
-        value = Path[type(resource)](attribute.urn).get(resource, strict=False)
+        value = parametrize(Path, type(resource))(attribute.urn).get(
+            resource, strict=False
+        )
         if isinstance(value, str) and not attribute.case_exact:
             return value.casefold()
         return value
 
     @staticmethod
-    def _touch_resource(resource: Resource, last_modified: datetime.datetime):
+    def _touch_resource(
+        resource: Resource[Any], last_modified: datetime.datetime
+    ) -> None:
         """Touches a resource (updates last_modified and version).
 
         Version is generated by hashing last_modified. Another option
         would be to hash the entire resource instead.
         """
+        assert resource.meta is not None
         resource.meta.last_modified = last_modified
         etag = generate_etag(pickle.dumps(resource.meta.last_modified))
         resource.meta.version = f'W/"{etag}"'
 
     def update_resource(
-        self, resource_type: ResourceType, resource: Resource
-    ) -> Resource | None:
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any] | None:
         found_res_idx = self._get_resource_idx(resource_type, resource.id)
         if found_res_idx is not None:
             updated_resource = type(resource).model_validate(resource.model_dump())

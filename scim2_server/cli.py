@@ -2,8 +2,12 @@ import argparse
 import json
 import logging
 import pprint
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from scim2_models import AuthenticationScheme
+from scim2_models import External
+from scim2_models import Reference
 from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import ScimProvider
@@ -16,25 +20,32 @@ from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
 
+if TYPE_CHECKING:
+    from _typeshed.wsgi import StartResponse
+    from _typeshed.wsgi import WSGIApplication
+    from _typeshed.wsgi import WSGIEnvironment
+
 BEARER_TOKEN_SCHEME = AuthenticationScheme(
-    type="oauthbearertoken",
+    type=AuthenticationScheme.Type.oauthbearertoken,
     name="bearer_token",
     description="HTTP Bearer Token",
-    spec_uri="https://datatracker.ietf.org/doc/html/rfc6750",
+    spec_uri=Reference[External]("https://datatracker.ietf.org/doc/html/rfc6750"),
 )
 
 
-def log_environ(handler):
+def log_environ(handler: "WSGIApplication") -> "WSGIApplication":
     """Build a simple decorator to log all WSGI environment variables."""
 
-    def _inner(environ, start_fn):
+    def _inner(
+        environ: "WSGIEnvironment", start_fn: "StartResponse"
+    ) -> Iterable[bytes]:
         logging.getLogger("log_environ").debug(pprint.pformat(environ))
         return handler(environ, start_fn)
 
     return _inner
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--schema", type=argparse.FileType("r"), help="Schema definitions"
@@ -71,12 +82,14 @@ def main():
 
     from werkzeug.serving import run_simple
 
+    schemas: Iterable[Schema]
     if args.schema is None:
         schemas = load_default_schemas().values()
     else:
         with args.schema:
             schemas = [Schema.model_validate(sc) for sc in json.load(args.schema)]
 
+    resource_types: Iterable[ResourceType]
     if args.resource_type is None:
         resource_types = load_default_resource_types().values()
     else:
@@ -108,15 +121,18 @@ def main():
         for bearer_token in args.bearer_token:
             app.register_bearer_token(bearer_token)
 
+    wsgi_app: WSGIApplication = app
     if args.debug:
-        app = log_environ(app)
+        wsgi_app = log_environ(wsgi_app)
     if args.reverse_proxy:
-        app = ProxyFix(app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+        wsgi_app = ProxyFix(
+            wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1
+        )
 
     run_simple(
         args.hostname,
         args.port,
-        app,
+        wsgi_app,
         use_debugger=args.debug,
         use_reloader=args.debug,
         threaded=True,

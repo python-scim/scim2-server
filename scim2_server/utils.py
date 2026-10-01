@@ -1,6 +1,8 @@
 import importlib.resources
 import json
 from typing import Any
+from typing import TypeVar
+from typing import cast
 
 from scim2_models import Resource
 from scim2_models import ResourceType
@@ -8,20 +10,29 @@ from scim2_models import Schema
 from scim2_models import ScimProvider
 from scim2_models import ServiceProviderConfig
 
+GenericT = TypeVar("GenericT")
+ResourceT = TypeVar("ResourceT", bound=Resource[Any])
+
+
+def parametrize(generic: type[GenericT], parameter: Any) -> type[GenericT]:
+    """Parametrize a generic class with a type only known at runtime."""
+    return cast("type[GenericT]", cast(Any, generic)[parameter])
+
 
 def load_json_resource(json_name: str) -> Any:
     """Load a JSON document from the scim2_server package resources."""
     fp = importlib.resources.files("scim2_server") / "resources" / json_name
-    with open(fp) as f:
+    with fp.open() as f:
         return json.load(f)
 
 
-def load_scim_resource(json_name: str, type_: type[Resource]):
+def load_scim_resource(json_name: str, type_: type[ResourceT]) -> dict[str, ResourceT]:
     """Load and validates a JSON document from the scim2_server package resources."""
     ret = {}
     definitions = load_json_resource(json_name)
     for d in definitions:
         model = type_.model_validate(d)
+        assert model.id is not None
         ret[model.id] = model
     return ret
 
