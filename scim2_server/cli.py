@@ -4,6 +4,7 @@ import logging
 import pprint
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
+from typing import Any
 
 from scim2_models import AuthenticationScheme
 from scim2_models import External
@@ -16,6 +17,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scim2_server.backend import InMemoryBackend
 from scim2_server.provider import SCIMApplication
+from scim2_server.tenants import TenantDispatcher
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
@@ -45,6 +47,11 @@ def log_environ(handler: "WSGIApplication") -> "WSGIApplication":
     return _inner
 
 
+def dump_resources(backend: InMemoryBackend) -> list[dict[str, Any]]:
+    """Return the JSON representation of the resources of a backend."""
+    return [r.model_dump() for r in backend.resources]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -70,6 +77,17 @@ def main() -> None:
         "--dump-resources",
         type=argparse.FileType("w"),
         help="Dump resources to a JSON file on exit",
+    )
+    parser.add_argument(
+        "--tenant",
+        action="append",
+        help="Serve a tenant under /TENANT, with its own resources",
+    )
+    parser.add_argument(
+        "--dynamic-tenants",
+        action="store_true",
+        help="Create a tenant on the first request to /TENANT. "
+        "Any client can then create tenants, and they stay in memory until exit",
     )
     parser.add_argument(
         "--debug",
@@ -112,16 +130,26 @@ def main() -> None:
             BEARER_TOKEN_SCHEME,
         ]
 
-    backend = InMemoryBackend()
-    app = SCIMApplication(
-        backend, ScimProvider.from_discovery(schemas, resource_types, config=config)
-    )
+    provider = ScimProvider.from_discovery(schemas, resource_types, config=config)
 
-    if args.bearer_token is not None:
-        for bearer_token in args.bearer_token:
+    backends: dict[str | None, InMemoryBackend] = {}
+
+    def make_application(tenant: str | None = None) -> SCIMApplication:
+        backends[tenant] = InMemoryBackend()
+        app = SCIMApplication(backends[tenant], provider)
+        for bearer_token in args.bearer_token or []:
             app.register_bearer_token(bearer_token)
+        return app
 
-    wsgi_app: WSGIApplication = app
+    use_tenants = bool(args.tenant or args.dynamic_tenants)
+    wsgi_app: WSGIApplication
+    if use_tenants:
+        wsgi_app = TenantDispatcher(
+            make_application, args.tenant or [], dynamic=args.dynamic_tenants
+        )
+    else:
+        wsgi_app = make_application()
+
     if args.debug:
         wsgi_app = log_environ(wsgi_app)
     if args.reverse_proxy:
@@ -139,8 +167,13 @@ def main() -> None:
     )
 
     if args.dump_resources:
+        dump: Any = (
+            {tenant: dump_resources(backend) for tenant, backend in backends.items()}
+            if use_tenants
+            else dump_resources(backends[None])
+        )
         with args.dump_resources as f:
-            f.write(json.dumps([r.model_dump() for r in backend.resources], indent=2))
+            f.write(json.dumps(dump, indent=2))
 
 
 if __name__ == "__main__":
