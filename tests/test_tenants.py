@@ -20,7 +20,7 @@ def make_client(dispatcher, script_name=""):
 
 @pytest.fixture
 def dispatcher(factory):
-    return TenantDispatcher(factory, dynamic=True)
+    return TenantDispatcher(factory)
 
 
 @pytest.fixture
@@ -90,8 +90,8 @@ def test_tenant_under_a_mount_prefix(dispatcher, fake_user_data):
     assert r.json()["meta"]["location"].startswith(f"{BASE_URL}/scim/a/v2/Users/")
 
 
-def test_dynamic_tenant_is_created_once(client, dispatcher):
-    """The first request to an unknown tenant creates it, later ones reuse it."""
+def test_tenant_is_built_once(client, dispatcher):
+    """The first request to a tenant builds its application, later ones reuse it."""
     assert dispatcher.applications == {}
     client.get("/a/v2/Users")
     application = dispatcher.applications["a"]
@@ -99,9 +99,11 @@ def test_dynamic_tenant_is_created_once(client, dispatcher):
     assert dispatcher.applications == {"a": application}
 
 
-def test_static_tenants(factory, fake_user_data):
-    """Without dynamic tenants, only the declared tenants exist."""
-    dispatcher = TenantDispatcher(factory, tenants=["a"])
+def test_unknown_tenant(factory, fake_user_data):
+    """A tenant the factory does not build gets a 404."""
+    dispatcher = TenantDispatcher(
+        lambda tenant: factory(tenant) if tenant == "a" else None
+    )
     with make_client(dispatcher) as client:
         assert client.post("/a/v2/Users", json=fake_user_data[0]).status_code == 201
         r = client.get("/b/v2/Users")
@@ -115,20 +117,28 @@ def test_static_tenants(factory, fake_user_data):
     assert list(dispatcher.applications) == ["a"]
 
 
+def test_unknown_tenant_is_asked_again(factory):
+    """A tenant that did not exist is served once the factory builds it."""
+    existing = set()
+    dispatcher = TenantDispatcher(
+        lambda tenant: factory(tenant) if tenant in existing else None
+    )
+    with make_client(dispatcher) as client:
+        assert client.get("/a/v2/Users").status_code == 404
+        existing.add("a")
+        assert client.get("/a/v2/Users").status_code == 200
+
+
 @pytest.mark.parametrize("path", ["/", "/v2/Users", "//Users"])
-def test_request_without_tenant(client, dispatcher, path):
-    """A request whose path has no valid tenant gets a 404 and creates nothing."""
-    r = client.get(path)
+def test_request_without_tenant(dispatcher, path):
+    """A request whose path has no valid tenant gets a 404 without calling the factory."""
+    calls = []
+    dispatcher.factory = calls.append
+    with make_client(dispatcher) as client:
+        r = client.get(path)
     assert r.status_code == 404
     assert r.json()["detail"] == "Unknown tenant"
-    assert dispatcher.applications == {}
-
-
-@pytest.mark.parametrize("tenant", ["", "v2", "a/b"])
-def test_invalid_static_tenant(factory, tenant):
-    """A declared tenant must be a single path segment other than the version."""
-    with pytest.raises(ValueError, match="Invalid tenant name"):
-        TenantDispatcher(factory, tenants=[tenant])
+    assert calls == []
 
 
 def test_tenant_from_a_header(factory, fake_user_data):
@@ -138,7 +148,7 @@ def test_tenant_from_a_header(factory, fake_user_data):
         def select_tenant(self, environ):
             return environ.get("HTTP_X_TENANT")
 
-    dispatcher = HeaderTenantDispatcher(factory, dynamic=True)
+    dispatcher = HeaderTenantDispatcher(factory)
     with make_client(dispatcher) as client:
         r = client.post("/v2/Users", json=fake_user_data[0], headers={"X-Tenant": "a"})
         assert r.json()["meta"]["location"].startswith(f"{BASE_URL}/v2/Users/")

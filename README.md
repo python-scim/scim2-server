@@ -52,7 +52,8 @@ This is useful for tests: each test can pick a random tenant and get an empty se
 Any client can then create tenants, even without a valid bearer token, and every tenant stays in memory until the server exits.
 Do not use this option on a server reachable by untrusted clients.
 
-In Python, `scim2_server.tenants.TenantDispatcher` builds one `SCIMApplication` per tenant from a factory.
+In Python, `scim2_server.tenants.TenantDispatcher` builds one `SCIMApplication` per tenant from a factory, on the first request to the tenant.
+The factory gets the tenant name and returns `None` when the tenant does not exist.
 Override its `select_tenant` method to read the tenant from a header or a sub-domain instead.
 
 ### Container

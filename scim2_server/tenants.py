@@ -21,26 +21,17 @@ class TenantDispatcher:
     method of RFC 7644 §6.1: a request to ``/<tenant>/v2/Users`` is served by
     the application of ``<tenant>``, mounted under ``/<tenant>``.
 
-    :param factory: Build the application of a tenant from its name.
-    :param tenants: The tenants created at startup.
-    :param dynamic: Whether a request to an unknown tenant creates it. Any
-        client can then create tenants, and each one stays in memory.
+    The application of a tenant is built on its first request, then kept for
+    the following ones.
+
+    :param factory: Build the application of a tenant from its name, or
+        return :data:`None` when the tenant does not exist.
     """
 
-    def __init__(
-        self,
-        factory: Callable[[str], SCIMApplication],
-        tenants: Iterable[str] = (),
-        dynamic: bool = False,
-    ):
+    def __init__(self, factory: Callable[[str], SCIMApplication | None]):
         self.factory = factory
-        self.dynamic = dynamic
         self.applications: dict[str, SCIMApplication] = {}
         self.lock = Lock()
-        for tenant in tenants:
-            if not self.is_valid_tenant(tenant):
-                raise ValueError(f"Invalid tenant name: {tenant!r}")
-            self.applications[tenant] = factory(tenant)
 
     @staticmethod
     def is_valid_tenant(tenant: str) -> bool:
@@ -67,11 +58,14 @@ class TenantDispatcher:
         return tenant
 
     def get_application(self, tenant: str) -> SCIMApplication | None:
-        """Return the application of a tenant, creating it if tenants are dynamic."""
+        """Return the application of a tenant, building it on its first request."""
         with self.lock:
-            if tenant not in self.applications and self.dynamic:
-                self.applications[tenant] = self.factory(tenant)
-            return self.applications.get(tenant)
+            if tenant not in self.applications:
+                application = self.factory(tenant)
+                if application is None:
+                    return None
+                self.applications[tenant] = application
+            return self.applications[tenant]
 
     def __call__(
         self, environ: "WSGIEnvironment", start_response: "StartResponse"

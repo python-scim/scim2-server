@@ -95,6 +95,9 @@ def main() -> None:
         help="Enable the interactive debugger, the reloader and the logging of the WSGI environment",
     )
     args = parser.parse_args()
+    for tenant in args.tenant or []:
+        if not TenantDispatcher.is_valid_tenant(tenant):
+            parser.error(f"invalid tenant name: {tenant!r}")
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
 
@@ -141,12 +144,15 @@ def main() -> None:
             app.register_bearer_token(bearer_token)
         return app
 
+    def make_tenant_application(tenant: str) -> SCIMApplication | None:
+        if not args.dynamic_tenants and tenant not in args.tenant:
+            return None
+        return make_application(tenant)
+
     use_tenants = bool(args.tenant or args.dynamic_tenants)
     wsgi_app: WSGIApplication
     if use_tenants:
-        wsgi_app = TenantDispatcher(
-            make_application, args.tenant or [], dynamic=args.dynamic_tenants
-        )
+        wsgi_app = TenantDispatcher(make_tenant_application)
     else:
         wsgi_app = make_application()
 
