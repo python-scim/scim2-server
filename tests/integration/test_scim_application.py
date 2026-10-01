@@ -42,6 +42,49 @@ class TestSCIMApplication:
                 == "https://sub.testserver.company:1234/foo/bar/v2/ServiceProviderConfig"
             )
 
+    def test_resource_location_under_a_mount_prefix(self, app, fake_user_data):
+        """The location of a resource keeps the prefix the application is mounted under."""
+        transport = httpx2.WSGITransport(app=app, script_name="/foo/bar")
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            r = client.post("/v2/Users", json=fake_user_data[0])
+            location = f"https://scim.example.com/foo/bar/v2/Users/{r.json()['id']}"
+            assert r.headers["Location"] == location
+            assert r.json()["meta"]["location"] == location
+            assert client.get("/Users").json()["Resources"][0]["meta"]["location"] == (
+                location
+            )
+
+            r = client.post(
+                "/v2/Bulk",
+                json={
+                    "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Users",
+                            "bulkId": "u",
+                            "data": fake_user_data[1],
+                        }
+                    ],
+                },
+            )
+            assert r.json()["Operations"][0]["location"].startswith(
+                "https://scim.example.com/foo/bar/v2/Users/"
+            )
+
+    def test_absolute_location_from_the_backend_is_kept(self, app, fake_user_data):
+        """A backend may store an absolute location, which is published as it is."""
+        transport = httpx2.WSGITransport(app=app, script_name="/foo")
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            user_id = client.post("/v2/Users", json=fake_user_data[0]).json()["id"]
+            app.backend.resources[0].meta.location = "https://other.example/Users/x"
+            r = client.get(f"/v2/Users/{user_id}")
+            assert r.json()["meta"]["location"] == "https://other.example/Users/x"
+
     def test_service_provider_configuration(self, wsgi):
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert r.status_code == 200

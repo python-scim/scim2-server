@@ -196,12 +196,12 @@ class SCIMApplication:
     def publish(self, request: Request, resource: Resource[Any]) -> Resource[Any]:
         """Return a copy of a resource in the form sent to the client.
 
-        Its location is made absolute from the URL the client requested, and
+        Its location is made absolute from the root URL of the application, and
         its version is left out when the service does not support ETags.
         """
         assert resource.meta is not None
         update: dict[str, Any] = {
-            "location": urljoin(request.url + "/", resource.meta.location)
+            "location": urljoin(request.url_root, resource.meta.location)
         }
         if not self.etag_supported:
             update["version"] = None

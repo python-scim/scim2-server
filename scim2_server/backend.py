@@ -98,7 +98,8 @@ class Backend:
         :param resource: Resource to create.
         :return: The created resource. Creation should set system-
             defined attributes (ID, Metadata). May be the same object
-            that is passed in.
+            that is passed in. A relative ``meta.location`` is relative to
+            the root of the application.
         """
         raise NotImplementedError
 
@@ -230,7 +231,7 @@ class InMemoryBackend(Backend):
             resource_type=resource_type.name,
             created=utcnow,
             last_modified=utcnow,
-            location="/v2" + resource_type.endpoint + "/" + resource.id,
+            location=f"v2/{resource_type.endpoint.strip('/')}/{resource.id}",
         )
         self._touch_resource(resource, utcnow)
         self._check_uniqueness(resource)
