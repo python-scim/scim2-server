@@ -14,11 +14,12 @@ they are lost once the process exits.
 - [x] HTTP PATCH (Add/Remove/Replace)
 - [x] Sorting
 - [x] Bulk operations
+- [x] Multi-tenancy with a URL prefix
 
 ## Usage
 
 ```shell
-$ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--service-provider-config SERVICE_PROVIDER_CONFIG] [--bearer-token BEARER_TOKEN] [--hostname HOSTNAME] [--port PORT] [--reverse-proxy] [--dump-resources DUMP_RESOURCES] [--debug]
+$ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--service-provider-config SERVICE_PROVIDER_CONFIG] [--bearer-token BEARER_TOKEN] [--hostname HOSTNAME] [--port PORT] [--reverse-proxy] [--dump-resources DUMP_RESOURCES] [--tenant TENANT] [--dynamic-tenants] [--debug]
 ```
 
 - `-h`/`--help`: Show help message
@@ -29,8 +30,30 @@ $ scim2-server [-h] [--schema SCHEMA] [--resource-type RESOURCE_TYPE] [--service
 - `--bearer-token`: Registers a bearer token that can be used for accessing the service, and announces the bearer token authentication scheme. If no tokens are provided, anonymous access without authentication is allowed.
 - `--hostname`: The hostname to listen on. Defaults to `127.0.0.1`.
 - `--port`: The port to listen on. Defaults to `8080`.
-- `--dump-resources`: Dump a JSON document containing all resources when the provider exits normally.
+- `--dump-resources`: Dump a JSON document containing all resources when the provider exits normally. With tenants, the document has one entry per tenant.
+- `--tenant`: Serve a tenant under `/<tenant>`, for example `/<tenant>/v2/Users`. Can be repeated. See [Multi-tenancy](#multi-tenancy).
+- `--dynamic-tenants`: Create a tenant on the first request to `/<tenant>`. See [Multi-tenancy](#multi-tenancy).
 - `--debug`: Enable the interactive Werkzeug debugger, the reloader and the logging of the WSGI environment of each request. The debugger allows arbitrary code execution and the environment contains the bearer tokens, so never use this option on a server reachable by others.
+
+### Multi-tenancy
+
+With `--tenant` or `--dynamic-tenants`, the first segment of the URL path selects a tenant (RFC 7644 §6.1).
+Each tenant has its own resources: `/a/v2/Users` and `/b/v2/Users` are separate, and uniqueness, filters and pagination only consider the resources of the tenant.
+The schemas, the resource types and the service provider configuration are the same for every tenant, and so are the bearer tokens.
+A request without a known tenant gets a 404 answer, and `v2` cannot be a tenant name.
+
+```shell
+$ scim2-server --tenant a --tenant b
+$ curl http://localhost:8080/a/v2/Users
+```
+
+With `--dynamic-tenants`, the first request to an unknown tenant creates it with no resources.
+This is useful for tests: each test can pick a random tenant and get an empty server.
+Any client can then create tenants, even without a valid bearer token, and every tenant stays in memory until the server exits.
+Do not use this option on a server reachable by untrusted clients.
+
+In Python, `scim2_server.tenants.TenantDispatcher` builds one `SCIMApplication` per tenant from a factory.
+Override its `select_tenant` method to read the tenant from a header or a sub-domain instead.
 
 ### Container
 
@@ -51,7 +74,6 @@ This provider can be used as a starting point if you want to implement a SCIM pr
 - Implement your own Backend as a subclass of `scim2_server.backend.Backend`
 - Implement proper authorization with OAuth instead of public access or static bearer tokens
 - Support the `/Me` endpoint, if it applies in your use case
-- Add support for using either a static URL prefix or improve the support for usage behind a reverse proxy
 
 The provider in its current state has been tested successfully against a live
 [Microsoft Entra](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/scim-validator-tutorial)
