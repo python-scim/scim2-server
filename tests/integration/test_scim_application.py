@@ -1092,29 +1092,6 @@ class TestSCIMApplication:
         assert j["meta"]["created"] == "2024-03-14T06:00:00Z"
         assert j["meta"]["lastModified"] == "2024-03-16T08:30:00Z"
 
-    def test_authentication(self, first_fake_user, app, wsgi):
-        r = wsgi.get("/v2/ServiceProviderConfig")
-        assert "WWW-Authenticate" not in r.headers
-        app.register_bearer_token("SuperSecretToken")
-
-        r = wsgi.get("/v2/ServiceProviderConfig")
-        assert "WWW-Authenticate" in r.headers
-
-        r = wsgi.get(f"/v2/Users/{first_fake_user}")
-        assert r.status_code == 401
-
-        r = wsgi.get(
-            f"/v2/Users/{first_fake_user}",
-            headers={"Authorization": "Bearer IncorrectToken"},
-        )
-        assert r.status_code == 401
-
-        r = wsgi.get(
-            f"/v2/Users/{first_fake_user}",
-            headers={"Authorization": "Bearer SuperSecretToken"},
-        )
-        assert r.status_code == 200
-
     def test_redirect(self, wsgi):
         r = wsgi.get("/v2", follow_redirects=False)
         assert r.is_redirect

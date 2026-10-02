@@ -19,8 +19,8 @@ from scim2_server.memory import InMemoryStorage
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
-from scim2_server.werkzeug.app import SCIMApplication
 from scim2_server.werkzeug.tenants import TenantDispatcher
+from scim2_server.werkzeug.testserver import BearerTokenApplication
 
 if TYPE_CHECKING:
     from _typeshed.wsgi import StartResponse
@@ -137,14 +137,13 @@ def main() -> None:
 
     storages: dict[str | None, InMemoryStorage] = {}
 
-    def make_application(tenant: str | None = None) -> SCIMApplication:
+    def make_application(tenant: str | None = None) -> BearerTokenApplication:
         storages[tenant] = InMemoryStorage()
-        app = SCIMApplication(storages[tenant], provider)
-        for bearer_token in args.bearer_token or []:
-            app.register_bearer_token(bearer_token)
-        return app
+        return BearerTokenApplication(
+            storages[tenant], provider, bearer_tokens=args.bearer_token or []
+        )
 
-    def make_tenant_application(tenant: str) -> SCIMApplication | None:
+    def make_tenant_application(tenant: str) -> BearerTokenApplication | None:
         if not args.dynamic_tenants and tenant not in args.tenant:
             return None
         return make_application(tenant)

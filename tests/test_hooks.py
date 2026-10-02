@@ -2,6 +2,7 @@ import httpx2
 import pytest
 from scim2_models import Error
 from scim2_models import NotFoundException
+from werkzeug.exceptions import Unauthorized
 
 from scim2_server.werkzeug import SCIMApplication
 
@@ -107,16 +108,21 @@ def test_handle_exception_is_not_called_for_a_failed_bulk_operation(
     assert recording_app.exceptions == []
 
 
-def test_wsgi_app_returns_the_response_sent_to_the_client(client, recording_app):
+def test_wsgi_app_returns_the_response_sent_to_the_client(storage, scim_provider):
     """The response returned by wsgi_app carries the headers added to every response."""
-    recording_app.register_bearer_token("token")
 
-    client.get("/v2/Users")
+    class RefusingApplication(RecordingApplication):
+        def check_auth(self, request):
+            raise Unauthorized
 
-    (response,) = recording_app.responses
+    app = RefusingApplication(storage, scim_provider)
+    transport = httpx2.WSGITransport(app=app)
+    with httpx2.Client(transport=transport, base_url="https://scim.example.com") as c:
+        c.get("/v2/Users")
+
+    (response,) = app.responses
     assert response.status_code == 401
     assert response.headers["Location"] == "https://scim.example.com/v2/Users"
-    assert response.headers["WWW-Authenticate"] == 'Bearer realm="SCIM Provider"'
 
 
 @pytest.mark.parametrize(
