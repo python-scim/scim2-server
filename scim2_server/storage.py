@@ -1,5 +1,6 @@
 from abc import ABC
 from abc import abstractmethod
+from contextlib import AbstractAsyncContextManager
 from contextlib import AbstractContextManager
 from contextlib import nullcontext
 from typing import Any
@@ -120,4 +121,52 @@ class ScimStorage(ABC):
         request (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`). Committing the
         request is left to the application.
         """
+        return nullcontext()
+
+
+class AsyncScimStorage(ABC):
+    """The asynchronous variant of :class:`ScimStorage`.
+
+    Its methods are coroutines, and follow the rules of :class:`ScimStorage`,
+    which :class:`~scim2_server.testing.AsyncScimStorageContract` checks.
+    """
+
+    @abstractmethod
+    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+        """Return a resource. See :meth:`ScimStorage.get`."""
+
+    @abstractmethod
+    async def search(
+        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> tuple[int, list[Resource[Any]]]:
+        """Return the number of matching resources, and one page of them. See :meth:`ScimStorage.search`."""
+
+    @abstractmethod
+    async def create(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        """Store a new resource. See :meth:`ScimStorage.create`."""
+
+    @abstractmethod
+    async def update(
+        self,
+        resource_type: ResourceType,
+        resource: Resource[Any],
+        *,
+        expected_version: str | None = None,
+    ) -> Resource[Any]:
+        """Replace a stored resource. See :meth:`ScimStorage.update`."""
+
+    @abstractmethod
+    async def delete(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        expected_version: str | None = None,
+    ) -> None:
+        """Delete a resource. See :meth:`ScimStorage.delete`."""
+
+    def operation(self) -> AbstractAsyncContextManager[None]:
+        """Enclose one SCIM operation. See :meth:`ScimStorage.operation`."""
         return nullcontext()

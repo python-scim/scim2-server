@@ -21,6 +21,7 @@ from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 
+from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
 from scim2_server.utils import parametrize
 
@@ -209,3 +210,60 @@ class InMemoryStorage(ScimStorage):
         if isinstance(value, str) and not attribute.case_exact:
             return value.casefold()
         return value
+
+
+class AsyncInMemoryStorage(AsyncScimStorage):
+    """The asynchronous variant of :class:`InMemoryStorage`.
+
+    It serves the resources of an :class:`InMemoryStorage`. Every call runs
+    without awaiting anything, so a call is never interrupted by another
+    coroutine. :meth:`~scim2_server.storage.AsyncScimStorage.operation` takes no lock: holding the lock of the
+    storage across an ``await`` would block the event loop. Two concurrent
+    updates of a resource are still told apart by ``expected_version``.
+
+    :param storage: The storage to serve. Pass a subclass of
+        :class:`InMemoryStorage` to change how identifiers are generated.
+    """
+
+    def __init__(self, storage: InMemoryStorage | None = None) -> None:
+        self.storage = storage if storage is not None else InMemoryStorage()
+
+    @property
+    def resources(self) -> list[Resource[Any]]:
+        """The stored resources."""
+        return self.storage.resources
+
+    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+        return self.storage.get(resource_type, resource_id)
+
+    async def search(
+        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> tuple[int, list[Resource[Any]]]:
+        return self.storage.search(resource_types, search_request)
+
+    async def create(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        return self.storage.create(resource_type, resource)
+
+    async def update(
+        self,
+        resource_type: ResourceType,
+        resource: Resource[Any],
+        *,
+        expected_version: str | None = None,
+    ) -> Resource[Any]:
+        return self.storage.update(
+            resource_type, resource, expected_version=expected_version
+        )
+
+    async def delete(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        expected_version: str | None = None,
+    ) -> None:
+        self.storage.delete(
+            resource_type, resource_id, expected_version=expected_version
+        )
