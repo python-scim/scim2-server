@@ -52,10 +52,18 @@ dev = [
     "prek>=0.1.0",
     "time-machine>=2.14.2",
     "tox-uv>=1.16.0",
+    "aiosqlite>=0.22.1",
     "mypy>=2.3.1",
     "scim2-client[werkzeug]>=0.11.2",
     "scim2-tester>=0.5.1",
     "werkzeug>=3.0.3",
+]
+doc = [
+    "shibuya>=2024.5.15",
+    "sphinx>=7.3.7",
+    "sphinx-argparse>=0.6.1",
+    "sphinx-design>=0.6.1",
+    "sphinx-issues>=5.0.0",
 ]
 
 [tool.uv]
@@ -126,7 +134,8 @@ docstring-code-format = true
 
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --doctest-glob='*.rst'"
+addopts = "--doctest-modules --doctest-glob='*.rst' --ignore=doc/conf.py"
+pythonpath = ["doc/_examples"]
 doctest_optionflags= "ALLOW_UNICODE IGNORE_EXCEPTION_DETAIL ELLIPSIS"
 
 [tool.tox]
@@ -138,6 +147,7 @@ env_list = [
     "py313",
     "py314",
     "minversions",
+    "doc",
     "coverage",
 ]
 
@@ -157,6 +167,12 @@ commands = [
 [tool.tox.env.minversions]
 runner = "uv-venv-runner"
 uv_resolution = "lowest-direct"
+
+[tool.tox.env.doc]
+dependency_groups = ["doc"]
+commands = [
+    ["sphinx-build", "-W", "--keep-going", "--builder", "html", "doc", "build/sphinx/html"],
+]
 
 [tool.tox.env.coverage]
 commands = [
