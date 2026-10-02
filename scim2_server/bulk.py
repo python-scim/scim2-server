@@ -1,4 +1,6 @@
 from collections.abc import Callable
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -8,15 +10,6 @@ from scim2_models import InvalidValueException
 from scim2_models import Resource
 
 BULK_ID_PREFIX = "bulkId:"
-
-Resolver = Callable[[BulkOperation[Resource[Any]]], BulkOperation[Resource[Any]]]
-"""Replaces the bulkId references of an operation."""
-
-OperationRunner = Callable[
-    [BulkOperation[Resource[Any]], Resolver],
-    tuple[dict[str, Any], Resource[Any] | None],
-]
-"""Applies an operation once resolved, and returns its outcome and the resource it acted on."""
 
 
 def replace_bulk_ids(value: Any, replace: Callable[[str], str]) -> Any:
@@ -69,27 +62,41 @@ def resolve_operation(
     return operation.model_copy(update=updates) if updates else operation
 
 
-class BulkJob:
-    """Run the operations of a bulk request, and resolve their "bulkId:" references.
+@dataclass(frozen=True)
+class BulkStep:
+    """One step of a bulk plan.
+
+    A step produces the result of one operation of the request. A step is not
+    an operation, so that a plan can later split an operation in several
+    steps, for instance to resolve circular references.
+    """
+
+    index: int
+    """The position, in the request, of the operation whose result the step produces."""
+
+
+class BulkPlan:
+    """The order of the operations of a bulk request, and the "bulkId:" references between them.
 
     RFC 7644 §3.7.2 lets an operation reference a resource that another POST
     of the same request creates. The operations run in the order of the
     request, except that a POST runs before the first operation that
     references it. The results keep the order of the request.
+
+    A plan does no input or output. The code running the request iterates
+    over the steps, resolves the references of each one, applies it, and
+    records its outcome.
     """
 
     def __init__(
         self,
         operations: list[BulkOperation[Resource[Any]]],
         fail_on_errors: int | None,
-        run: OperationRunner,
     ):
-        self.run_resolved = run
         self.operations = operations
         self.fail_on_errors = fail_on_errors
         self.results: dict[int, dict[str, Any]] = {}
         self.created: dict[str, Resource[Any]] = {}
-        self.running: set[int] = set()
         self.errors = 0
 
         self.creations: dict[str, int] = {}
@@ -100,12 +107,50 @@ class BulkJob:
             ):
                 self.creations.setdefault(operation.bulk_id, index)
 
+        self.steps = self.plan_steps()
+
+    def plan_steps(self) -> list[BulkStep]:
+        """Order the operations so that a creation comes before the operations referencing it.
+
+        The order comes from a depth-first walk of the references, without
+        recursion, so a long chain of references cannot exhaust the stack.
+        A circular reference leaves the referencing operation before the
+        creation it references, and :meth:`resolve` then refuses it.
+        """
+        order: list[BulkStep] = []
+        visited: set[int] = set()
+        for root in range(len(self.operations)):
+            if root in visited:
+                continue
+            on_path = {root}
+            stack = [(root, iter(self.dependencies(root)))]
+            while stack:
+                index, dependencies = stack[-1]
+                dependency = next(dependencies, None)
+                if dependency is None:
+                    stack.pop()
+                    on_path.discard(index)
+                    visited.add(index)
+                    order.append(BulkStep(index))
+                elif dependency not in visited and dependency not in on_path:
+                    on_path.add(dependency)
+                    stack.append((dependency, iter(self.dependencies(dependency))))
+        return order
+
+    def dependencies(self, index: int) -> list[int]:
+        """Return the positions of the creations an operation references."""
+        return [
+            self.creations[bulk_id]
+            for bulk_id in self.references(self.operations[index])
+            if bulk_id in self.creations
+        ]
+
     @property
     def stopped(self) -> bool:
-        """Whether the job reached the number of errors the client accepts.
+        """Whether the request reached the number of errors the client accepts.
 
-        RFC 7644 §3.7.3: the job goes on despite failures, unless the client
-        caps the errors it accepts with "failOnErrors".
+        RFC 7644 §3.7.3: the request goes on despite failures, unless the
+        client caps the errors it accepts with "failOnErrors".
         """
         return (
             self.errors > 0
@@ -113,33 +158,30 @@ class BulkJob:
             and self.errors >= self.fail_on_errors
         )
 
-    def run(self) -> list[dict[str, Any]]:
-        """Run every operation, and return the results of the operations that ran."""
-        for index in range(len(self.operations)):
-            self.run_operation(index)
+    def __iter__(self) -> Iterator[BulkStep]:
+        """Yield the steps to run, until the request is stopped."""
+        for step in self.steps:
+            if self.stopped:
+                return
+            yield step
+
+    def operation(self, step: BulkStep) -> BulkOperation[Resource[Any]]:
+        """Return the operation of a step, as the client sent it."""
+        return self.operations[step.index]
+
+    def record(
+        self, step: BulkStep, result: dict[str, Any], resource: Resource[Any] | None
+    ) -> None:
+        """Record the outcome of a step, and the resource it created or updated."""
+        self.results[step.index] = result
+        if result["status"] >= 400:
+            self.errors += 1
+        elif resource is not None and self.is_creation(step.index, result["bulk_id"]):
+            self.created[result["bulk_id"]] = resource
+
+    def outcomes(self) -> list[dict[str, Any]]:
+        """Return the outcome of the operations that ran, in the order of the request."""
         return [self.results[index] for index in sorted(self.results)]
-
-    def run_operation(self, index: int) -> None:
-        """Run an operation, after the creations it references."""
-        if index in self.results or index in self.running or self.stopped:
-            return
-
-        operation = self.operations[index]
-        self.running.add(index)
-        for bulk_id in self.references(operation):
-            if bulk_id in self.creations:
-                self.run_operation(self.creations[bulk_id])
-
-        if not self.stopped:
-            result, resource = self.run_resolved(
-                operation, lambda operation: self.resolve(index, operation)
-            )
-            self.results[index] = result
-            if result["status"] >= 400:
-                self.errors += 1
-            elif resource is not None and self.is_creation(index, result["bulk_id"]):
-                self.created[result["bulk_id"]] = resource
-        self.running.discard(index)
 
     def is_creation(self, index: int, bulk_id: str | None) -> bool:
         """Whether an operation is the creation a bulkId references."""
@@ -157,18 +199,19 @@ class BulkJob:
         resolve_operation(operation, collect)
         return bulk_ids
 
-    def resolve(
-        self, index: int, operation: BulkOperation[Resource[Any]]
-    ) -> BulkOperation[Resource[Any]]:
-        """Replace the bulkId references of an operation with the identifiers of the created resources.
+    def resolve(self, step: BulkStep) -> BulkOperation[Resource[Any]]:
+        """Replace the bulkId references of the operation of a step with the identifiers of the created resources.
 
-        :raises ConflictException: When a referenced resource was not created, as
-            RFC 7644 §3.7.1 allows for circular references.
+        :raises ~scim2_models.InvalidValueException: When a POST reuses the
+            bulkId of an earlier POST.
+        :raises ~scim2_models.ConflictException: When a referenced resource
+            was not created, as RFC 7644 §3.7.1 allows for circular references.
         """
+        operation = self.operation(step)
         if (
             operation.method == BulkOperation.Method.post
             and operation.bulk_id is not None
-            and not self.is_creation(index, operation.bulk_id)
+            and not self.is_creation(step.index, operation.bulk_id)
         ):
             raise InvalidValueException(
                 detail=f"The bulkId {operation.bulk_id} is not unique in the request"
@@ -177,7 +220,8 @@ class BulkJob:
         def replace(bulk_id: str) -> str:
             if bulk_id in self.created:
                 return str(self.created[bulk_id].id)
-            if self.creations.get(bulk_id) in self.running:
+            creation = self.creations.get(bulk_id)
+            if creation is not None and creation not in self.results:
                 raise ConflictException(
                     detail=f"The bulkId {bulk_id} is part of a circular reference"
                 )
