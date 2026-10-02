@@ -21,6 +21,7 @@ from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 
+from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
 from scim2_server.utils import parametrize
 
@@ -154,8 +155,8 @@ class InMemoryStorage(ScimStorage):
     def _is_of_type(self, resource: Resource[Any], resource_type: ResourceType) -> bool:
         """Tell whether a resource belongs to a resource type.
 
-        RFC 7643 §3.1 has meta.resourceType carry the name of the resource type,
-        which may differ from its id.
+        Per RFC 7643 §3.1, meta.resourceType holds the name of the resource
+        type, which may differ from its id.
         """
         assert resource.meta is not None
         return resource.meta.resource_type == resource_type.name
@@ -177,9 +178,9 @@ class InMemoryStorage(ScimStorage):
     def _check_uniqueness(self, resource: Resource[Any]) -> None:
         """Refuse a resource sharing a unique value with another one of the same schema.
 
-        RFC 7643 erratum 8279 scopes the uniqueness to the resources using the
-        schema that declares the attribute, whatever their resource type. A
-        missing value never clashes, as a SQL NULL does not.
+        Per RFC 7643 erratum 8279, the uniqueness applies to the resources
+        using the schema that declares the attribute, whatever their resource
+        type. A missing value never clashes, as a SQL NULL does not.
         """
         unique_paths = parametrize(Path, type(resource)).iter_paths(
             include_subattributes=False,
@@ -209,3 +210,60 @@ class InMemoryStorage(ScimStorage):
         if isinstance(value, str) and not attribute.case_exact:
             return value.casefold()
         return value
+
+
+class AsyncInMemoryStorage(AsyncScimStorage):
+    """The asynchronous variant of :class:`InMemoryStorage`.
+
+    It serves the resources of an :class:`InMemoryStorage`. Every call runs
+    without awaiting anything, so a call is never interrupted by another
+    coroutine. :meth:`~scim2_server.storage.AsyncScimStorage.operation` takes no lock: holding the lock of the
+    storage across an ``await`` would block the event loop. Two concurrent
+    updates of a resource are still told apart by ``expected_version``.
+
+    :param storage: The storage to serve. Pass a subclass of
+        :class:`InMemoryStorage` to change how identifiers are generated.
+    """
+
+    def __init__(self, storage: InMemoryStorage | None = None) -> None:
+        self.storage = storage if storage is not None else InMemoryStorage()
+
+    @property
+    def resources(self) -> list[Resource[Any]]:
+        """The stored resources."""
+        return self.storage.resources
+
+    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+        return self.storage.get(resource_type, resource_id)
+
+    async def search(
+        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> tuple[int, list[Resource[Any]]]:
+        return self.storage.search(resource_types, search_request)
+
+    async def create(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        return self.storage.create(resource_type, resource)
+
+    async def update(
+        self,
+        resource_type: ResourceType,
+        resource: Resource[Any],
+        *,
+        expected_version: str | None = None,
+    ) -> Resource[Any]:
+        return self.storage.update(
+            resource_type, resource, expected_version=expected_version
+        )
+
+    async def delete(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        expected_version: str | None = None,
+    ) -> None:
+        self.storage.delete(
+            resource_type, resource_id, expected_version=expected_version
+        )

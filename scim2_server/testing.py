@@ -1,6 +1,6 @@
 """A test suite checking that a storage follows the :class:`~scim2_server.storage.ScimStorage` contract.
 
-Subclass :class:`ScimStorageContract` in your own tests, and give it a
+Subclass :class:`ScimStorageContract` in the tests of a storage, and give it a
 ``storage`` fixture returning a new, empty storage::
 
     from scim2_server.testing import ScimStorageContract
@@ -11,10 +11,20 @@ Subclass :class:`ScimStorageContract` in your own tests, and give it a
         def storage(self):
             return MyStorage()
 
+For an :class:`~scim2_server.storage.AsyncScimStorage`, subclass
+:class:`AsyncScimStorageContract` and give it an ``async_storage`` fixture
+instead.
+
 The suite needs the ``testing`` extra, which installs pytest.
 """
 
+import asyncio
+from collections.abc import Coroutine
+from collections.abc import Generator
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
+from typing import TypeVar
 from typing import Union
 from typing import cast
 
@@ -27,9 +37,12 @@ from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import UniquenessException
 
+from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import parametrize
+
+T = TypeVar("T")
 
 
 class ScimStorageContract:
@@ -460,3 +473,84 @@ class ScimStorageContract:
         with storage.operation():
             (user,) = self.create_users(storage, user_type, user_model, "bjensen")
             storage.get(user_type, user.id)
+
+    def test_operation_lets_exceptions_through(self, storage: Any) -> None:
+        """An exception raised within an operation is not swallowed."""
+        with pytest.raises(RuntimeError), storage.operation():
+            raise RuntimeError
+
+
+class BlockingStorage(ScimStorage):
+    """Run the coroutines of an asynchronous storage one by one, for the contract tests."""
+
+    def __init__(self, storage: AsyncScimStorage, runner: asyncio.Runner) -> None:
+        self.storage = storage
+        self.runner = runner
+
+    def run(self, coroutine: Coroutine[Any, Any, T]) -> T:
+        return self.runner.run(coroutine)
+
+    def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+        return self.run(self.storage.get(resource_type, resource_id))
+
+    def search(
+        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> tuple[int, list[Resource[Any]]]:
+        return self.run(self.storage.search(resource_types, search_request))
+
+    def create(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        return self.run(self.storage.create(resource_type, resource))
+
+    def update(
+        self,
+        resource_type: ResourceType,
+        resource: Resource[Any],
+        *,
+        expected_version: str | None = None,
+    ) -> Resource[Any]:
+        return self.run(
+            self.storage.update(
+                resource_type, resource, expected_version=expected_version
+            )
+        )
+
+    def delete(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        expected_version: str | None = None,
+    ) -> None:
+        self.run(
+            self.storage.delete(
+                resource_type, resource_id, expected_version=expected_version
+            )
+        )
+
+    @contextmanager
+    def operation(self) -> Generator[None]:
+        manager = self.storage.operation()
+        self.run(manager.__aenter__())
+        try:
+            yield
+        except BaseException as exception:
+            self.run(
+                manager.__aexit__(type(exception), exception, exception.__traceback__)
+            )
+            raise
+        self.run(manager.__aexit__(None, None, None))
+
+
+class AsyncScimStorageContract(ScimStorageContract):
+    """The rules every :class:`~scim2_server.storage.AsyncScimStorage` follows.
+
+    These are the rules of :class:`ScimStorageContract`. Each test runs the
+    coroutines of the storage on a single event loop, one after the other.
+    """
+
+    @pytest.fixture
+    def storage(self, async_storage: AsyncScimStorage) -> Iterator[ScimStorage]:
+        with asyncio.Runner() as runner:
+            yield BlockingStorage(async_storage, runner)

@@ -1,5 +1,6 @@
 from abc import ABC
 from abc import abstractmethod
+from contextlib import AbstractAsyncContextManager
 from contextlib import AbstractContextManager
 from contextlib import nullcontext
 from typing import Any
@@ -12,7 +13,7 @@ from scim2_models import SearchRequest
 class ScimStorage(ABC):
     """Where a SCIM server reads and writes its resources.
 
-    Subclass it to connect the server to your own data, such as a SQL database
+    Subclass it to connect the server to a data source, such as a SQL database
     or a directory. The server handles the SCIM protocol, and calls these
     methods to read, search, create, update and delete resources. Every method
     receives the :class:`~scim2_models.ResourceType` it applies to, so a single
@@ -83,7 +84,7 @@ class ScimStorage(ABC):
     ) -> Resource[Any]:
         """Replace the stored resource that has the identifier of ``resource``, and return the stored resource.
 
-        The server calls it for PUT and PATCH requests alike. It applies the
+        The server calls it for PUT and PATCH requests. It applies the
         request to the stored resource first, so ``resource`` is the whole new
         state of the resource.
 
@@ -120,4 +121,52 @@ class ScimStorage(ABC):
         request (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`). Committing the
         request is left to the application.
         """
+        return nullcontext()
+
+
+class AsyncScimStorage(ABC):
+    """The asynchronous variant of :class:`ScimStorage`.
+
+    Its methods are coroutines, and follow the rules of :class:`ScimStorage`,
+    which :class:`~scim2_server.testing.AsyncScimStorageContract` checks.
+    """
+
+    @abstractmethod
+    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+        """Return a resource. See :meth:`ScimStorage.get`."""
+
+    @abstractmethod
+    async def search(
+        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> tuple[int, list[Resource[Any]]]:
+        """Return the number of matching resources, and one page of them. See :meth:`ScimStorage.search`."""
+
+    @abstractmethod
+    async def create(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        """Store a new resource. See :meth:`ScimStorage.create`."""
+
+    @abstractmethod
+    async def update(
+        self,
+        resource_type: ResourceType,
+        resource: Resource[Any],
+        *,
+        expected_version: str | None = None,
+    ) -> Resource[Any]:
+        """Replace a stored resource. See :meth:`ScimStorage.update`."""
+
+    @abstractmethod
+    async def delete(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        expected_version: str | None = None,
+    ) -> None:
+        """Delete a resource. See :meth:`ScimStorage.delete`."""
+
+    def operation(self) -> AbstractAsyncContextManager[None]:
+        """Enclose one SCIM operation. See :meth:`ScimStorage.operation`."""
         return nullcontext()

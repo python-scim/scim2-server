@@ -17,6 +17,7 @@ from scim2_models import Error
 from scim2_models import Filter
 from scim2_models import ForbiddenException
 from scim2_models import InvalidSyntaxException
+from scim2_models import InvalidValueException
 from scim2_models import ListResponse
 from scim2_models import Meta
 from scim2_models import NotFoundException
@@ -40,6 +41,13 @@ from scim2_server.errors import UnsupportedMediaTypeException
 from scim2_server.responses import ScimResponse
 from scim2_server.utils import load_default_service_provider_config
 from scim2_server.utils import parametrize
+
+BULK_SUCCESS_STATUS = {
+    BulkOperation.Method.post: HTTPStatus.CREATED,
+    BulkOperation.Method.put: HTTPStatus.OK,
+    BulkOperation.Method.patch: HTTPStatus.OK,
+    BulkOperation.Method.delete: HTTPStatus.NO_CONTENT,
+}
 
 SEARCH_REQUEST_PARAMETERS = (
     "attributes",
@@ -379,6 +387,12 @@ class ScimService:
             search_request.count = max_results
         return search_request
 
+    def searched_types(self, endpoint: str | None) -> list[ResourceType]:
+        """Return the resource types a search covers: those of the endpoint, or all of them at the root."""
+        if endpoint is None:
+            return list(self.provider.resource_types)
+        return [self.resource_type_at(endpoint)]
+
     def search_response(
         self,
         base_url: str,
@@ -532,6 +546,79 @@ class ScimService:
             cast(list[BulkOperation[Resource[Any]]], operations),
             bulk_request.fail_on_errors,
         )
+
+    @staticmethod
+    def bulk_outcome(operation: BulkOperation[Resource[Any]]) -> dict[str, Any]:
+        """Start the outcome of a bulk operation, before it runs."""
+        return {"method": operation.method, "bulk_id": operation.bulk_id}
+
+    def locate_bulk_operation(
+        self,
+        base_url: str,
+        operation: BulkOperation[Resource[Any]],
+        outcome: dict[str, Any],
+    ) -> ResourceType | None:
+        """Return the resource type a resolved bulk operation targets, and locate its resource.
+
+        The location is set before the operation runs, so a failure still
+        knows it. :rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>` requires it for
+        every operation but a failed POST.
+        """
+        resource_type = self.get_resource_type_by_endpoint(operation.endpoint or "")
+        if resource_type is not None and operation.resource_id:
+            outcome["location"] = self.resource_location(
+                base_url, resource_type, operation.resource_id
+            )
+        return resource_type
+
+    @staticmethod
+    def bulk_validation_failure(
+        operation: BulkOperation[Resource[Any]], outcome: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Return the outcome of a bulk operation that failed its validation, if it did."""
+        if not isinstance(operation.response, Error):
+            return None
+        return {**outcome, "status": operation.status, "response": operation.response}
+
+    @staticmethod
+    def check_bulk_target(operation: BulkOperation[Resource[Any]]) -> str | None:
+        """Check that the path of a bulk operation fits its method.
+
+        :return: The identifier of the targeted resource, or :data:`None` for a POST.
+        :raises ~scim2_models.InvalidValueException: When a POST targets a
+            resource, or another method a resource type endpoint.
+        """
+        resource_id = operation.resource_id
+        if (operation.method == BulkOperation.Method.post) == bool(resource_id):
+            raise InvalidValueException(
+                detail="A POST path must target a resource type endpoint, other methods a resource"
+            )
+        return resource_id
+
+    def bulk_failure(
+        self, outcome: dict[str, Any], exception: Exception
+    ) -> dict[str, Any]:
+        """Return the outcome of a bulk operation that raised an exception."""
+        error = self.error_of(exception)
+        return {**outcome, "status": error.status, "response": error}
+
+    def bulk_success(
+        self,
+        base_url: str,
+        operation: BulkOperation[Resource[Any]],
+        outcome: dict[str, Any],
+        resource: Resource[Any] | None,
+    ) -> dict[str, Any]:
+        """Return the outcome of a bulk operation that succeeded."""
+        assert operation.method is not None
+        outcome["status"] = BULK_SUCCESS_STATUS[operation.method]
+        if resource is None:
+            return outcome
+        published = self.publish(base_url, resource)
+        assert published.meta is not None
+        outcome["location"] = published.meta.location
+        outcome["version"] = published.meta.version
+        return outcome
 
     def bulk_response(self, plan: BulkPlan) -> ScimResponse:
         """Return the response listing the outcome of each operation that ran."""

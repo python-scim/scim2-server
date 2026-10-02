@@ -1,3 +1,4 @@
+import asyncio
 import importlib.resources
 import json
 
@@ -5,6 +6,8 @@ import httpx2
 import pytest
 from scim2_models import ScimProvider
 
+from scim2_server.handler import AsyncScimHandler
+from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
 from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_provider
@@ -43,9 +46,30 @@ def fake_user_data():
     return load_json_resource("fake_user_data.json")
 
 
-@pytest.fixture
-def app(storage, scim_provider):
-    return SCIMApplication(storage, scim_provider)
+class BlockingHandler:
+    """Serve the requests of a SCIM application with an AsyncScimHandler, one coroutine at a time."""
+
+    def __init__(self, handler):
+        self.handler = handler
+
+    def __getattr__(self, name):
+        method = getattr(self.handler, name)
+
+        def call(*args, **kwargs):
+            return asyncio.run(method(*args, **kwargs))
+
+        return call
+
+
+@pytest.fixture(params=["sync", "async"])
+def app(request, storage, scim_provider):
+    """Return a SCIM application, served by the synchronous handler, then by the asynchronous one."""
+    app = SCIMApplication(storage, scim_provider)
+    if request.param == "async":
+        app.handler = BlockingHandler(
+            AsyncScimHandler(app.service, AsyncInMemoryStorage(storage))
+        )
+    return app
 
 
 @pytest.fixture

@@ -16,7 +16,9 @@ from scim2_models import Sort
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 
+from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
+from scim2_server.testing import AsyncScimStorageContract
 from scim2_server.testing import ScimStorageContract
 from scim2_server.utils import load_default_service_provider_config
 
@@ -25,6 +27,23 @@ class TestInMemoryStorage(ScimStorageContract):
     @pytest.fixture
     def storage(self):
         return InMemoryStorage()
+
+
+class TestAsyncInMemoryStorage(AsyncScimStorageContract):
+    @pytest.fixture
+    def async_storage(self):
+        return AsyncInMemoryStorage()
+
+
+def test_async_storage_serves_the_resources_of_a_given_storage(
+    user_type, scim_provider
+):
+    """An asynchronous storage serves the resources of the storage it is given."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="bjensen"))
+
+    assert AsyncInMemoryStorage(storage).resources == storage.resources
 
 
 class TestInMemoryStorageWithoutSearchFeatures(ScimStorageContract):
