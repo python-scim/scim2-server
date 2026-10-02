@@ -301,7 +301,7 @@ class SCIMApplication:
         self.ensure_supported(self.config.patch, "PATCH")
         patch_operation = parametrize(
             PatchOp, self.get_model(resource_type)
-        ).model_validate(payload)
+        ).model_validate(payload, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
         resource = self.get_existing_resource(resource_type, resource_id)
         self.check_preconditions(resource, "PATCH", if_match, if_none_match)
 

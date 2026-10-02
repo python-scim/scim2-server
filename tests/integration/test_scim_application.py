@@ -725,6 +725,31 @@ class TestSCIMApplication:
         )
         assert r.status_code == 404
 
+    @pytest.mark.parametrize(
+        ("body", "scim_type"),
+        [
+            ({"Operations": [{"op": "remove"}]}, "noTarget"),
+            ({"Operations": [{"op": "add", "path": "displayName"}]}, "invalidValue"),
+            (
+                {"Operations": [{"op": "replace", "path": "displayName"}]},
+                "invalidValue",
+            ),
+            ({}, "invalidValue"),
+        ],
+    )
+    def test_resource_patch_incomplete_operations_are_refused(
+        self, wsgi, first_fake_user, body, scim_type
+    ):
+        """A PATCH missing a member RFC 7644 §3.5.2 requires is refused, and the resource is unchanged."""
+        before = wsgi.get(f"/v2/Users/{first_fake_user}").json()
+        r = wsgi.patch(
+            f"/v2/Users/{first_fake_user}",
+            json={"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], **body},
+        )
+        assert r.status_code == 400
+        assert r.json()["scimType"] == scim_type
+        assert wsgi.get(f"/v2/Users/{first_fake_user}").json() == before
+
     def test_resource_search_non_existing(self, wsgi):
         r = wsgi.get("/v2/InvalidResourceType")
         assert r.status_code == 404
