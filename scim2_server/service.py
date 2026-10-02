@@ -42,6 +42,12 @@ from scim2_server.responses import ScimResponse
 from scim2_server.utils import load_default_service_provider_config
 from scim2_server.utils import parametrize
 
+
+def scim_exception_of(exception: ValidationError) -> SCIMException:
+    """Return the SCIM exception of an invalid request."""
+    return SCIMException.from_error(Error.from_validation_errors(exception)[0])
+
+
 BULK_SUCCESS_STATUS = {
     BulkOperation.Method.post: HTTPStatus.CREATED,
     BulkOperation.Method.put: HTTPStatus.OK,
@@ -205,7 +211,10 @@ class ScimService:
     ) -> ModelT:
         """Validate a request body with a model, in the context of its operation."""
         self.ensure_json(content_type)
-        return model.model_validate_json(body, scim_ctx=scim_ctx)
+        try:
+            return model.model_validate_json(body, scim_ctx=scim_ctx)
+        except ValidationError as exception:
+            raise scim_exception_of(exception) from exception
 
     def decode_body(self, body: bytes, content_type: str | None) -> Any:
         """Return the JSON value of a request body, unvalidated."""
@@ -307,15 +316,17 @@ class ScimService:
         self, resource_type: ResourceType, query: Mapping[str, str]
     ) -> ResponseParameters[Any]:
         """Read the "attributes" and "excludedAttributes" query parameters."""
-        return parametrize(
-            ResponseParameters, self.get_model(resource_type)
-        ).model_validate(
-            {
-                key: query[key]
-                for key in ("attributes", "excludedAttributes")
-                if key in query
-            }
-        )
+        parameters = {
+            key: query[key]
+            for key in ("attributes", "excludedAttributes")
+            if key in query
+        }
+        try:
+            return parametrize(
+                ResponseParameters, self.get_model(resource_type)
+            ).model_validate(parameters)
+        except ValidationError as exception:
+            raise scim_exception_of(exception) from exception
 
     def query_response(
         self,
@@ -375,10 +386,13 @@ class ScimService:
         if parameters & {"sortby", "sortorder"}:
             self.ensure_supported(self.config.sort, "Sorting")
 
-        search_request = parametrize(
-            SearchRequest,
-            Union[tuple(self.search_models(resource_types))],  # noqa: UP007
-        ).model_validate(payload, scim_ctx=Context.SEARCH_REQUEST)
+        try:
+            search_request = parametrize(
+                SearchRequest,
+                Union[tuple(self.search_models(resource_types))],  # noqa: UP007
+            ).model_validate(payload, scim_ctx=Context.SEARCH_REQUEST)
+        except ValidationError as exception:
+            raise scim_exception_of(exception) from exception
         search_request.start_index = search_request.start_index or 1
         max_results = self.config.filter.max_results if self.config.filter else None
         if max_results is not None and (
@@ -716,16 +730,12 @@ class ScimService:
     def error_of(exception: Exception) -> Error:
         """Return the SCIM error of an exception raised while serving a request.
 
-        An unexpected exception gives a 500, without its message nor its
-        traceback.
+        Any other exception than a :class:`~scim2_models.SCIMException` is
+        unexpected, and gives a 500, without its message nor its traceback.
         """
-        match exception:
-            case SCIMException():
-                return exception.to_error()
-            case ValidationError():
-                return Error.from_validation_errors(exception)[0]
-            case _:
-                return Error(status=500, detail="Internal server error")
+        if isinstance(exception, SCIMException):
+            return exception.to_error()
+        return Error(status=500, detail="Internal server error")
 
     def error_response(self, exception: Exception) -> ScimResponse:
         """Return the SCIM error response of an exception raised while serving a request."""
