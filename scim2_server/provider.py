@@ -2,6 +2,7 @@ import itertools
 import json
 import logging
 from collections.abc import Iterable
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
@@ -811,29 +812,64 @@ class SCIMApplication:
         return self.make_response(resp)
 
     def wsgi_app(self, request: Request, environ: "WSGIEnvironment") -> Response:
+        """Serve a request and return the response sent to the client."""
         try:
-            urls = self.url_map.bind_to_environ(environ)
-            endpoint, args = urls.match()
-
-            if endpoint != "service_provider_config":
-                # RFC7643, Section 5: skip authentication for ServiceProviderConfig
-                self.check_auth(request)
-
-            # Wrap the entire call in a transaction. Should probably be optimized (use transaction only when necessary).
-            # The provider makes its policy the one every payload is read under.
-            with self.provider, self.backend:
-                response: Response = getattr(self, f"call_{endpoint}")(request, **args)
-            return response
+            endpoint, args = self.url_map.bind_to_environ(environ).match()
+            response = self.dispatch_request(request, endpoint, args)
         except RequestRedirect as e:
             # urls.match may cause a redirect, handle it as a special case of HTTPException
             self.log.exception(e)
-            return e.get_response(environ)
+            response = e.get_response(environ)
         except Exception as e:
-            response = self.make_error(self.error_from(e))
-            if isinstance(e, MethodNotAllowed) and e.valid_methods:
-                # RFC 9110 §15.5.6: a 405 answer lists the supported methods.
-                response.headers["Allow"] = ", ".join(sorted(e.valid_methods))
-            return response
+            response = self.handle_exception(request, e)
+        return self.finalize_response(request, response)
+
+    def dispatch_request(
+        self, request: Request, endpoint: str, args: Mapping[str, Any]
+    ) -> Response:
+        """Authenticate a routed request and serve it with the method of its endpoint.
+
+        Override this method to act before or after a request is served.
+
+        :param endpoint: The endpoint of the request, served by the ``call_<endpoint>`` method.
+        :param args: The arguments read from the request path.
+        """
+        if endpoint != "service_provider_config":
+            # RFC7643, Section 5: skip authentication for ServiceProviderConfig
+            self.check_auth(request)
+
+        # Wrap the entire call in a transaction. Should probably be optimized (use transaction only when necessary).
+        # The provider makes its policy the one every payload is read under.
+        with self.provider, self.backend:
+            response: Response = getattr(self, f"call_{endpoint}")(request, **args)
+        return response
+
+    def handle_exception(self, request: Request, exception: Exception) -> Response:
+        """Return the SCIM error response of an exception raised while serving a request.
+
+        Override this method to observe the errors of the requests. The errors
+        of the operations of a bulk request are not passed to this method.
+        """
+        response = self.make_error(self.error_from(exception))
+        if isinstance(exception, MethodNotAllowed) and exception.valid_methods:
+            # RFC 9110 §15.5.6: a 405 answer lists the supported methods.
+            response.headers["Allow"] = ", ".join(sorted(exception.valid_methods))
+        return response
+
+    def finalize_response(self, request: Request, response: Response) -> Response:
+        """Add the headers every response carries, and return the response.
+
+        Override this method to change or observe the response sent to the client.
+        """
+        if "Location" not in response.headers:
+            # The spec is not explicit about requiring the "Location" header in all responses,
+            # but the examples in RFC 7644 include the "Location" header even for responses that
+            # did not create a new resource
+            response.headers.add("Location", request.url)
+        if self.bearer_tokens and not request.authorization:
+            # RFC 7644, Section 2
+            response.headers.add("WWW-Authenticate", 'Bearer realm="SCIM Provider"')
+        return response
 
     def __call__(
         self, environ: "WSGIEnvironment", start_response: "StartResponse"
@@ -845,12 +881,4 @@ class SCIMApplication:
             environ["PATH_INFO"], _, _ = environ["PATH_INFO"].rpartition(".scim")
         request = Request(environ)
         response = self.wsgi_app(request, environ)
-        if "Location" not in response.headers:
-            # The spec is not explicit about requiring the "Location" header in all responses,
-            # but the examples in RFC 7644 include the "Location" header even for responses that
-            # did not create a new resource
-            response.headers.add("Location", request.url)
-        if self.bearer_tokens and not request.authorization:
-            # RFC 7644, Section 2
-            response.headers.add("WWW-Authenticate", 'Bearer realm="SCIM Provider"')
         return response(environ, start_response)
