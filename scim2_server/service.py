@@ -7,6 +7,7 @@ from typing import cast
 
 from pydantic import ValidationError
 from pydantic_core import from_json
+from scim2_models import AuthenticationScheme
 from scim2_models import BaseModel
 from scim2_models import Bulk
 from scim2_models import BulkOperation
@@ -53,6 +54,12 @@ BULK_SUCCESS_STATUS = {
     BulkOperation.Method.put: HTTPStatus.OK,
     BulkOperation.Method.patch: HTTPStatus.OK,
     BulkOperation.Method.delete: HTTPStatus.NO_CONTENT,
+}
+
+CHALLENGES = {
+    AuthenticationScheme.Type.oauthbearertoken: 'Bearer realm="SCIM"',
+    AuthenticationScheme.Type.oauth2: 'Bearer realm="SCIM"',
+    AuthenticationScheme.Type.httpbasic: 'Basic realm="SCIM"',
 }
 
 SEARCH_REQUEST_PARAMETERS = (
@@ -738,6 +745,29 @@ class ScimService:
         return Error(status=500, detail="Internal server error")
 
     def error_response(self, exception: Exception) -> ScimResponse:
-        """Return the SCIM error response of an exception raised while serving a request."""
+        """Return the SCIM error response of an exception raised while serving a request.
+
+        A 401 response carries the ``WWW-Authenticate`` header of
+        :meth:`www_authenticate`.
+        """
         error = self.error_of(exception)
-        return ScimResponse(HTTPStatus(error.status or 500), error.model_dump())
+        response = ScimResponse(HTTPStatus(error.status or 500), error.model_dump())
+        if isinstance(exception, SCIMException) and exception.status == 401:
+            challenge = self.www_authenticate(exception)
+            if challenge:
+                response.headers["WWW-Authenticate"] = challenge
+        return response
+
+    def www_authenticate(self, exception: SCIMException) -> str | None:
+        """Return the ``WWW-Authenticate`` header of a 401 response (RFC 7644 §2).
+
+        It holds one challenge per authentication scheme of the service
+        provider configuration, for the Bearer and Basic schemes. Override this
+        method to announce other schemes, or to add parameters to the
+        challenges, such as ``resource_metadata`` (RFC 9728 §5.1).
+        """
+        schemes = self.config.authentication_schemes or []
+        challenges = dict.fromkeys(
+            CHALLENGES[scheme.type] for scheme in schemes if scheme.type in CHALLENGES
+        )
+        return ", ".join(challenges) or None

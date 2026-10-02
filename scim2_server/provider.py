@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 
 from scim2_models import Error
 from scim2_models import NotImplementedException
+from scim2_models import SCIMException
 from scim2_models import ScimProvider
 from werkzeug import Request
 from werkzeug import Response
@@ -311,12 +312,18 @@ class SCIMApplication:
             headers=headers,
         )
 
-    def error_from(self, exception: Exception) -> Error:
-        """Log an exception raised while serving a request and return its SCIM Error."""
+    def scim_exception_from(self, exception: Exception) -> Exception:
+        """Log an exception raised while serving a request, and return it as a SCIM exception.
+
+        A werkzeug HTTP error keeps its status. Other exceptions are returned
+        unchanged.
+        """
         self.log.exception(exception)
         if isinstance(exception, HTTPException):
-            return Error(status=exception.code, detail=exception.description)
-        return self.service.error_of(exception)
+            return SCIMException.from_error(
+                Error(status=exception.code, detail=exception.description)
+            )
+        return exception
 
     def make_error(self, error: Error) -> Response:
         """Construct a werkzeug response from a SCIM Error."""
@@ -362,7 +369,9 @@ class SCIMApplication:
         Override this method to observe the errors of the requests. The errors
         of the operations of a bulk request are not passed to this method.
         """
-        response = self.make_error(self.error_from(exception))
+        response = self.make_response(
+            self.service.error_response(self.scim_exception_from(exception))
+        )
         if isinstance(exception, MethodNotAllowed) and exception.valid_methods:
             # RFC 9110 §15.5.6: a 405 answer lists the supported methods.
             response.headers["Allow"] = ", ".join(sorted(exception.valid_methods))
