@@ -5,7 +5,7 @@ import httpx2
 import pytest
 from scim2_models import ScimProvider
 
-from scim2_server.backend import InMemoryBackend
+from scim2_server.memory import InMemoryStorage
 from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
@@ -23,8 +23,8 @@ def user_type(scim_provider):
 
 
 @pytest.fixture
-def backend():
-    return InMemoryBackend()
+def storage():
+    return InMemoryStorage()
 
 
 @pytest.fixture(scope="session")
@@ -44,8 +44,8 @@ def fake_user_data():
 
 
 @pytest.fixture
-def app(backend, scim_provider):
-    return SCIMApplication(backend, scim_provider)
+def app(storage, scim_provider):
+    return SCIMApplication(storage, scim_provider)
 
 
 @pytest.fixture
@@ -54,12 +54,12 @@ def wsgi(app):
     client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
     client.__enter__()
     yield client
-    app.backend.resources = []
+    app.storage.resources = []
     client.__exit__(None, None, None)
 
 
 @pytest.fixture
-def wsgi_with(backend, scim_provider):
+def wsgi_with(storage, scim_provider):
     """Build clients of applications serving the default resources under another configuration or policy."""
     clients = []
 
@@ -70,7 +70,7 @@ def wsgi_with(backend, scim_provider):
             config=config or scim_provider.config,
             policy=policy,
         )
-        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        transport = httpx2.WSGITransport(app=SCIMApplication(storage, provider))
         client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
         clients.append(client)
         return client

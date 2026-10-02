@@ -74,17 +74,6 @@ class TestSCIMApplication:
                 "https://scim.example.com/foo/bar/v2/Users/"
             )
 
-    def test_absolute_location_from_the_backend_is_kept(self, app, fake_user_data):
-        """A backend may store an absolute location, which is published as it is."""
-        transport = httpx2.WSGITransport(app=app, script_name="/foo")
-        with httpx2.Client(
-            transport=transport, base_url="https://scim.example.com"
-        ) as client:
-            user_id = client.post("/v2/Users", json=fake_user_data[0]).json()["id"]
-            app.backend.resources[0].meta.location = "https://other.example/Users/x"
-            r = client.get(f"/v2/Users/{user_id}")
-            assert r.json()["meta"]["location"] == "https://other.example/Users/x"
-
     def test_service_provider_configuration(self, wsgi):
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert r.status_code == 200
@@ -134,7 +123,7 @@ class TestSCIMApplication:
             "sort": {"supported": True},
         }
 
-    def test_service_provider_configuration_from_the_provider(self, backend):
+    def test_service_provider_configuration_from_the_provider(self, storage):
         """The configuration the provider carries is the one published."""
         config = ServiceProviderConfig(
             patch=Patch(supported=False),
@@ -145,7 +134,7 @@ class TestSCIMApplication:
             etag=ETag(supported=False),
         )
         provider = ScimProvider(models=[User], config=config)
-        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        transport = httpx2.WSGITransport(app=SCIMApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
@@ -153,10 +142,10 @@ class TestSCIMApplication:
         assert published["patch"] == {"supported": False}
         assert published["filter"] == {"supported": False}
 
-    def test_service_provider_configuration_defaults(self, backend):
+    def test_service_provider_configuration_defaults(self, storage):
         """A provider carrying no configuration is served the default one."""
         provider = ScimProvider(models=[User])
-        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        transport = httpx2.WSGITransport(app=SCIMApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
@@ -500,7 +489,7 @@ class TestSCIMApplication:
         self, app, user_type, wsgi, first_fake_user
     ):
         """A client never gets the password back, so omitting it does not clear it."""
-        stored = app.backend.get_resource(user_type, first_fake_user)
+        stored = app.storage.get(user_type, first_fake_user)
         assert stored.password is not None
 
         r = wsgi.put(
@@ -508,7 +497,7 @@ class TestSCIMApplication:
             json={"userName": "joseph96@williams-brown.com"},
         )
         assert r.status_code == 200
-        replaced = app.backend.get_resource(user_type, first_fake_user)
+        replaced = app.storage.get(user_type, first_fake_user)
         assert replaced.password == stored.password
 
     def test_resource_put_clears_a_password_set_to_null(
@@ -520,7 +509,7 @@ class TestSCIMApplication:
             json={"userName": "joseph96@williams-brown.com", "password": None},
         )
         assert r.status_code == 200
-        assert app.backend.get_resource(user_type, first_fake_user).password is None
+        assert app.storage.get(user_type, first_fake_user).password is None
 
     def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
         """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""

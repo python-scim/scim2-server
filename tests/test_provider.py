@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 from scim2_models import Context
+from scim2_models import NotFoundException
 from werkzeug.exceptions import HTTPException
 
 
@@ -23,7 +24,7 @@ class TestProvider:
             },
             scim_ctx=Context.RESOURCE_CREATION_REQUEST,
         )
-        ret = app.backend.create_resource(user_type, user_model)
+        ret = app.storage.create(user_type, user_model)
         assert ret.id is not None
 
     def test_generic_exception_handling(self, app):
@@ -54,9 +55,9 @@ class TestProvider:
             assert response.json["detail"] == "Internal server error"
             assert "Traceback" not in response.get_data(as_text=True)
 
-    def test_replace_resource_lost_by_the_backend(self, app, wsgi, first_fake_user):
-        """A PUT answers 404 when the backend no longer has the resource to update."""
-        with patch.object(app.backend, "update_resource", return_value=None):
+    def test_replace_resource_lost_by_the_storage(self, app, wsgi, first_fake_user):
+        """A PUT answers 404 when the storage no longer has the resource to update."""
+        with patch.object(app.storage, "update", side_effect=NotFoundException()):
             r = wsgi.put(
                 f"/v2/Users/{first_fake_user}",
                 json={
@@ -67,9 +68,9 @@ class TestProvider:
 
         assert r.status_code == 404
 
-    def test_patch_resource_lost_by_the_backend(self, app, wsgi, first_fake_user):
-        """A PATCH answers 404 when the backend no longer has the resource to update."""
-        with patch.object(app.backend, "update_resource", return_value=None):
+    def test_patch_resource_lost_by_the_storage(self, app, wsgi, first_fake_user):
+        """A PATCH answers 404 when the storage no longer has the resource to update."""
+        with patch.object(app.storage, "update", side_effect=NotFoundException()):
             r = wsgi.patch(
                 f"/v2/Users/{first_fake_user}",
                 json={
@@ -132,3 +133,14 @@ class TestProvider:
         r = wsgi.get("/v2/SchemasArchive")
 
         assert r.status_code == 404
+
+
+def test_a_resource_of_an_unknown_type_from_the_storage(app, wsgi, first_fake_user):
+    """A resource whose meta.resourceType the provider does not serve answers 500."""
+    (user,) = app.storage.resources
+    user.meta.resource_type = "Unknown"
+
+    with patch.object(app.storage, "search", return_value=(1, [user])):
+        r = wsgi.get("/v2/Users")
+
+    assert r.status_code == 500

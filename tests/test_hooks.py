@@ -1,7 +1,7 @@
 import httpx2
 import pytest
 from scim2_models import Error
-from werkzeug.exceptions import NotFound
+from scim2_models import NotFoundException
 
 from scim2_server.provider import SCIMApplication
 
@@ -32,8 +32,8 @@ class RecordingApplication(SCIMApplication):
 
 
 @pytest.fixture
-def recording_app(backend, scim_provider):
-    return RecordingApplication(backend, scim_provider)
+def recording_app(storage, scim_provider):
+    return RecordingApplication(storage, scim_provider)
 
 
 @pytest.fixture
@@ -56,14 +56,14 @@ def test_dispatch_request_receives_the_endpoint_and_the_path_arguments(
     ]
 
 
-def test_dispatch_request_can_answer_in_place_of_the_endpoint(backend, scim_provider):
+def test_dispatch_request_can_answer_in_place_of_the_endpoint(storage, scim_provider):
     """A response returned by dispatch_request is sent instead of the endpoint response."""
 
     class ThrottledApplication(SCIMApplication):
         def dispatch_request(self, request, endpoint, args):
             return self.make_error(Error(status=429, detail="Too many requests"))
 
-    app = ThrottledApplication(backend, scim_provider)
+    app = ThrottledApplication(storage, scim_provider)
     with httpx2.Client(
         transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
     ) as client:
@@ -87,7 +87,7 @@ def test_handle_exception_receives_the_exception_of_the_request(client, recordin
 
     assert r.status_code == 404
     (exception,) = recording_app.exceptions
-    assert isinstance(exception, NotFound)
+    assert isinstance(exception, NotFoundException)
 
 
 def test_handle_exception_is_not_called_for_a_failed_bulk_operation(
@@ -128,7 +128,7 @@ def test_wsgi_app_returns_the_response_sent_to_the_client(client, recording_app)
     ],
 )
 def test_finalize_response_receives_every_response(
-    backend, scim_provider, path, status
+    storage, scim_provider, path, status
 ):
     """Successful, error and redirect responses all go through finalize_response."""
 
@@ -137,7 +137,7 @@ def test_finalize_response_receives_every_response(
             response.headers["X-Finalized"] = "yes"
             return super().finalize_response(request, response)
 
-    app = TaggingApplication(backend, scim_provider)
+    app = TaggingApplication(storage, scim_provider)
     with httpx2.Client(
         transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
     ) as client:

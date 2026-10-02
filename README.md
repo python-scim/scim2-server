@@ -72,7 +72,7 @@ To build the image yourself, use `docker build --file Containerfile .` or `podma
 This provider can be used as a starting point if you want to implement a SCIM provider. You should probably change the following things, if you want to use it in production:
 
 - Use a proper production WSGI server instead of the one provided by Werkzeug
-- Implement your own Backend as a subclass of `scim2_server.backend.Backend`
+- Implement your own storage as a subclass of `scim2_server.storage.ScimStorage`, and check it with `scim2_server.testing.ScimStorageContract`
 - Implement proper authorization with OAuth instead of public access or static bearer tokens
 - Support the `/Me` endpoint, if it applies in your use case
 
