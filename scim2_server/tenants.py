@@ -1,11 +1,13 @@
 from collections.abc import Callable
 from collections.abc import Iterable
+from http import HTTPStatus
 from threading import Lock
 from typing import TYPE_CHECKING
 
 from scim2_models import Error
 
 from scim2_server.provider import SCIMApplication
+from scim2_server.responses import ScimResponse
 
 if TYPE_CHECKING:
     from _typeshed.wsgi import StartResponse
@@ -75,7 +77,10 @@ class TenantDispatcher:
         application = self.get_application(tenant) if tenant is not None else None
         if application is None:
             response = SCIMApplication.make_response(
-                Error(status=404, detail="Unknown tenant").model_dump(), status=404
+                ScimResponse(
+                    HTTPStatus.NOT_FOUND,
+                    Error(status=404, detail="Unknown tenant").model_dump(),
+                )
             )
             return response(environ, start_response)
         return application(environ, start_response)

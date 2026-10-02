@@ -96,7 +96,7 @@ class TestSCIMApplicationBasic:
         assert r.json()["userName"] == "bjensen2@example.com"
 
     def test_sort(self, app, wsgi):
-        TypedListResponse = ListResponse[Union[tuple(app.get_models())]]  # noqa: UP007
+        TypedListResponse = ListResponse[Union[tuple(app.service.get_models())]]  # noqa: UP007
 
         def assert_sorted(sort_by: str, sorted: list[str], endpoint: str = "/v2/Users"):
             for order_by, inverted in (
@@ -286,3 +286,36 @@ class TestSCIMApplicationBasic:
 
         r = wsgi.get("/v2/Users", params={"sortBy": "emails.type"})
         assert [resource["id"] for resource in r.json()["Resources"]] == ids[::-1]
+
+
+@pytest.mark.parametrize("content_type", ["text/plain", None])
+def test_a_body_that_is_not_json_answers_415(wsgi, content_type):
+    """A request body without a JSON media type is refused with a 415."""
+    headers = {"Content-Type": content_type} if content_type else {}
+    r = wsgi.post("/v2/Users", content=b'{"userName": "bjensen"}', headers=headers)
+
+    assert r.status_code == 415
+    assert r.json()["status"] == "415"
+
+
+def test_a_json_body_is_accepted(wsgi):
+    """A request body sent as application/json is accepted."""
+    r = wsgi.post(
+        "/v2/Users",
+        content=b'{"userName": "bjensen"}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 201
+
+
+def test_a_search_body_that_is_not_valid_json_answers_400(wsgi):
+    """A search body that cannot be read as JSON answers 400 invalidSyntax."""
+    r = wsgi.post(
+        "/v2/Users/.search",
+        content=b"{not json",
+        headers={"Content-Type": "application/scim+json"},
+    )
+
+    assert r.status_code == 400
+    assert r.json()["scimType"] == "invalidSyntax"
