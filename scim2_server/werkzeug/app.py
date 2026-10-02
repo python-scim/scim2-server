@@ -52,13 +52,25 @@ class SCIMApplication:
 
     It routes the requests, reads them, and serves them with a
     :class:`~scim2_server.handler.ScimHandler`.
+
+    :param storage: The storage of the resources.
+    :param provider: The description of the service.
+    :param service: The service serving the requests, built upon ``provider``.
+        Pass a subclass of :class:`~scim2_server.service.ScimService` to change
+        one of its steps, such as the URL of the resources. A
+        :class:`~scim2_server.service.ScimService` of ``provider`` by default.
     """
 
-    def __init__(self, storage: ScimStorage, provider: ScimProvider):
+    def __init__(
+        self,
+        storage: ScimStorage,
+        provider: ScimProvider,
+        service: ScimService | None = None,
+    ):
         self.bearer_tokens: set[str] = set()
         self.storage = storage
         self.provider = provider
-        self.service = ScimService(provider)
+        self.service = service if service is not None else ScimService(provider)
         self.handler = ScimHandler(self.service, storage)
         self.log = logging.getLogger("SCIMApplication")
 
