@@ -21,9 +21,10 @@ class ScimHandler:
     """Serve the SCIM operations, by calling the steps of a service and a storage in turn.
 
     Each method serves one SCIM operation, and returns its
-    :class:`~scim2_server.responses.ScimResponse`. A failure raises an exception,
-    that :meth:`ScimService.error_response
+    :class:`~scim2_server.responses.ScimResponse`. A failure raises a
+    :class:`~scim2_models.SCIMException`, that :meth:`ScimService.error_response
     <scim2_server.service.ScimService.error_response>` turns into a response.
+    Any other exception is a bug.
 
     ``base_url`` is the root URL of the SCIM endpoints, as the client sees it,
     and ``endpoint`` the endpoint of a resource type, such as ``Users``.
