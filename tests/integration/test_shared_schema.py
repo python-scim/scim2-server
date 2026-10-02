@@ -3,7 +3,7 @@ import pytest
 from scim2_models import ResourceType
 from scim2_models import ScimProvider
 
-from scim2_server.backend import InMemoryBackend
+from scim2_server.memory import InMemoryStorage
 from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
@@ -23,7 +23,7 @@ def wsgi():
         [*load_default_resource_types().values(), admin],
         config=load_default_service_provider_config(),
     )
-    transport = httpx2.WSGITransport(app=SCIMApplication(InMemoryBackend(), provider))
+    transport = httpx2.WSGITransport(app=SCIMApplication(InMemoryStorage(), provider))
     with httpx2.Client(
         transport=transport, base_url="https://scim.example.com"
     ) as client:

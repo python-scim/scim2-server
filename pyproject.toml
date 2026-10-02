@@ -33,6 +33,11 @@ dependencies = [
     "werkzeug>=3.0.3",
 ]
 
+[project.optional-dependencies]
+testing = [
+    "pytest>=9.1.1",
+]
+
 [project.urls]
 repository = "https://github.com/python-scim/scim2-server"
 funding = "https://github.com/sponsors/python-scim"

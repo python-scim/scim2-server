@@ -893,6 +893,11 @@ dependencies = [
     { name = "werkzeug" },
 ]
 
+[package.optional-dependencies]
+testing = [
+    { name = "pytest" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx2" },
@@ -908,9 +913,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "scim2-models", specifier = ">=0.10.3" },
     { name = "werkzeug", specifier = ">=3.0.3" },
 ]
+provides-extras = ["testing"]
 
 [package.metadata.requires-dev]
 dev = [

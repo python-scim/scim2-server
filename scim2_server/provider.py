@@ -46,11 +46,11 @@ from werkzeug.routing import Map
 from werkzeug.routing import Rule
 from werkzeug.routing.exceptions import RequestRedirect
 
-from scim2_server.backend import Backend
 from scim2_server.bulk import BulkJob
 from scim2_server.bulk import Resolver
 from scim2_server.conditions import NO_CONDITIONS
 from scim2_server.conditions import Conditions
+from scim2_server.storage import ScimStorage
 from scim2_server.utils import load_default_service_provider_config
 from scim2_server.utils import parametrize
 
@@ -97,9 +97,9 @@ class ResourceEndpointConverter(BaseConverter):
 class SCIMApplication:
     """A WSGI application implementing a SCIM provider (server)."""
 
-    def __init__(self, backend: Backend, provider: ScimProvider):
+    def __init__(self, storage: ScimStorage, provider: ScimProvider):
         self.bearer_tokens: set[str] = set()
-        self.backend = backend
+        self.storage = storage
         self.provider = provider
         self.config = provider.config or load_default_service_provider_config()
         self.log = logging.getLogger("SCIMApplication")
@@ -187,6 +187,32 @@ class SCIMApplication:
             None,
         )
 
+    def get_resource_type_of(self, resource: Resource[Any]) -> ResourceType:
+        """Return the resource type of a stored resource, from its meta.resourceType.
+
+        :raises ValueError: When the storage returned a resource of a type the
+            provider does not serve.
+        """
+        name = resource.meta.resource_type if resource.meta else None
+        for resource_type in self.provider.resource_types:
+            if resource_type.name == name:
+                return resource_type
+        raise ValueError(
+            f"The storage returned a resource of an unknown resource type: {name!r}"
+        )
+
+    def resource_location(
+        self, request: Request, resource_type: ResourceType, resource_id: str
+    ) -> str:
+        """Return the URL of a resource.
+
+        Override this method to serve the resources at other URLs.
+        """
+        assert resource_type.endpoint is not None
+        return urljoin(
+            request.url_root, f"v2/{resource_type.endpoint.strip('/')}/{resource_id}"
+        )
+
     @property
     def etag_supported(self) -> bool:
         """Whether the configuration declares the resources versioned with ETags."""
@@ -195,12 +221,15 @@ class SCIMApplication:
     def publish(self, request: Request, resource: Resource[Any]) -> Resource[Any]:
         """Return a copy of a resource in the form sent to the client.
 
-        Its location is made absolute from the root URL of the application, and
-        its version is left out when the service does not support ETags.
+        Its location is set, and its version is left out when the service does
+        not support ETags.
         """
         assert resource.meta is not None
+        assert resource.id is not None
         update: dict[str, Any] = {
-            "location": urljoin(request.url_root, resource.meta.location)
+            "location": self.resource_location(
+                request, self.get_resource_type_of(resource), resource.id
+            )
         }
         if not self.etag_supported:
             update["version"] = None
@@ -234,24 +263,12 @@ class SCIMApplication:
             if_none_match=request.headers.get("If-None-Match"),
         )
 
-    def get_existing_resource(
-        self, resource_type: ResourceType, resource_id: str
-    ) -> Resource[Any]:
-        """Return a stored resource.
-
-        :raises NotFound: When no resource of this type has this identifier.
-        """
-        resource = self.backend.get_resource(resource_type, resource_id)
-        if resource is None:
-            raise NotFound
-        return resource
-
     def create(self, resource_type: ResourceType, payload: Any) -> Resource[Any]:
         """Validate a creation payload and store the new resource."""
         resource = self.get_model(resource_type).model_validate(
             payload, scim_ctx=Context.RESOURCE_CREATION_REQUEST
         )
-        return self.backend.create_resource(resource_type, resource)
+        return self.storage.create(resource_type, resource)
 
     def replace(
         self,
@@ -261,7 +278,7 @@ class SCIMApplication:
         conditions: Conditions = NO_CONDITIONS,
     ) -> Resource[Any]:
         """Replace a stored resource with a payload and return the stored result."""
-        resource = self.get_existing_resource(resource_type, resource_id)
+        resource = self.storage.get(resource_type, resource_id)
         self.check_preconditions(resource, "PUT", conditions)
 
         replacement = self.get_model(resource_type).model_validate(
@@ -270,7 +287,10 @@ class SCIMApplication:
         # A PUT that changes nothing keeps meta.lastModified and the ETag.
         if not replacement.replace(resource):
             return resource
-        return self.update(resource_type, replacement)
+        assert resource.meta is not None
+        return self.storage.update(
+            resource_type, replacement, expected_version=resource.meta.version
+        )
 
     def patch(
         self,
@@ -284,25 +304,15 @@ class SCIMApplication:
         patch_operation = parametrize(
             PatchOp, self.get_model(resource_type)
         ).model_validate(payload, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
-        resource = self.get_existing_resource(resource_type, resource_id)
+        resource = self.storage.get(resource_type, resource_id)
         self.check_preconditions(resource, "PATCH", conditions)
 
+        assert resource.meta is not None
+        version = resource.meta.version
         # A PATCH that changes nothing keeps meta.lastModified and the ETag.
         if not patch_operation.patch(resource):
             return resource
-        return self.update(resource_type, resource)
-
-    def update(
-        self, resource_type: ResourceType, resource: Resource[Any]
-    ) -> Resource[Any]:
-        """Store an updated resource and return the stored result.
-
-        :raises NotFound: When the backend no longer has the resource.
-        """
-        updated = self.backend.update_resource(resource_type, resource)
-        if updated is None:
-            raise NotFound
-        return updated
+        return self.storage.update(resource_type, resource, expected_version=version)
 
     def delete(
         self,
@@ -311,9 +321,12 @@ class SCIMApplication:
         conditions: Conditions = NO_CONDITIONS,
     ) -> None:
         """Delete a stored resource."""
-        resource = self.get_existing_resource(resource_type, resource_id)
+        resource = self.storage.get(resource_type, resource_id)
         self.check_preconditions(resource, "DELETE", conditions)
-        self.backend.delete_resource(resource_type, resource_id)
+        assert resource.meta is not None
+        self.storage.delete(
+            resource_type, resource_id, expected_version=resource.meta.version
+        )
 
     def call_single_resource(
         self, request: Request, resource_endpoint: str, resource_id: str, **kwargs: Any
@@ -325,7 +338,7 @@ class SCIMApplication:
         match request.method:
             case "GET":
                 resource = self.publish(
-                    request, self.get_existing_resource(resource_type, resource_id)
+                    request, self.storage.get(resource_type, resource_id)
                 )
                 if not self.check_preconditions(
                     resource, "GET", self.get_conditions(request)
@@ -453,9 +466,10 @@ class SCIMApplication:
         models = self.get_models() if resource is None else [self.get_model(resource)]
         search_request = self.build_search_request(request, models)
 
-        total_results, results = self.backend.query_resources(
-            search_request=search_request, resource_type=resource
+        resource_types = (
+            list(self.provider.resource_types) if resource is None else [resource]
         )
+        total_results, results = self.storage.search(resource_types, search_request)
         results = [self.publish(request, r) for r in results]
 
         resources = [
@@ -818,7 +832,7 @@ class SCIMApplication:
 
         # Wrap the entire call in a transaction. Should probably be optimized (use transaction only when necessary).
         # The provider makes its policy the one every payload is read under.
-        with self.provider, self.backend:
+        with self.provider, self.storage.operation():
             response: Response = getattr(self, f"call_{endpoint}")(request, **args)
         return response
 

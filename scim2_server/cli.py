@@ -15,7 +15,7 @@ from scim2_models import ScimProvider
 from scim2_models import ServiceProviderConfig
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from scim2_server.backend import InMemoryBackend
+from scim2_server.memory import InMemoryStorage
 from scim2_server.provider import SCIMApplication
 from scim2_server.tenants import TenantDispatcher
 from scim2_server.utils import load_default_resource_types
@@ -47,9 +47,9 @@ def log_environ(handler: "WSGIApplication") -> "WSGIApplication":
     return _inner
 
 
-def dump_resources(backend: InMemoryBackend) -> list[dict[str, Any]]:
-    """Return the JSON representation of the resources of a backend."""
-    return [r.model_dump() for r in backend.resources]
+def dump_resources(storage: InMemoryStorage) -> list[dict[str, Any]]:
+    """Return the JSON representation of the resources of a storage."""
+    return [r.model_dump() for r in storage.resources]
 
 
 def main() -> None:
@@ -135,11 +135,11 @@ def main() -> None:
 
     provider = ScimProvider.from_discovery(schemas, resource_types, config=config)
 
-    backends: dict[str | None, InMemoryBackend] = {}
+    storages: dict[str | None, InMemoryStorage] = {}
 
     def make_application(tenant: str | None = None) -> SCIMApplication:
-        backends[tenant] = InMemoryBackend()
-        app = SCIMApplication(backends[tenant], provider)
+        storages[tenant] = InMemoryStorage()
+        app = SCIMApplication(storages[tenant], provider)
         for bearer_token in args.bearer_token or []:
             app.register_bearer_token(bearer_token)
         return app
@@ -174,9 +174,9 @@ def main() -> None:
 
     if args.dump_resources:
         dump: Any = (
-            {tenant: dump_resources(backend) for tenant, backend in backends.items()}
+            {tenant: dump_resources(storage) for tenant, storage in storages.items()}
             if use_tenants
-            else dump_resources(backends[None])
+            else dump_resources(storages[None])
         )
         with args.dump_resources as f:
             f.write(json.dumps(dump, indent=2))
