@@ -29,7 +29,7 @@ classifiers = [
 
 requires-python = ">= 3.11"
 dependencies = [
-    "scim2-models>=0.10.0",
+    "scim2-models>=0.10.3",
     "werkzeug>=3.0.3",
 ]
 
@@ -49,6 +49,8 @@ dev = [
     "time-machine>=2.14.2",
     "tox-uv>=1.16.0",
     "mypy>=2.3.1",
+    "scim2-client[werkzeug]>=0.11.2",
+    "scim2-tester>=0.5.1",
 ]
 
 [tool.uv]

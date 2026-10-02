@@ -34,17 +34,13 @@ from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
 from werkzeug import Request
 from werkzeug import Response
-from werkzeug.datastructures import ETags
 from werkzeug.exceptions import Forbidden
 from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import MethodNotAllowed
 from werkzeug.exceptions import NotFound
 from werkzeug.exceptions import NotImplemented as WerkzeugNotImplemented
-from werkzeug.exceptions import PreconditionFailed
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.exceptions import Unauthorized
-from werkzeug.http import parse_etags
-from werkzeug.http import unquote_etag
 from werkzeug.routing import BaseConverter
 from werkzeug.routing import Map
 from werkzeug.routing import Rule
@@ -53,6 +49,8 @@ from werkzeug.routing.exceptions import RequestRedirect
 from scim2_server.backend import Backend
 from scim2_server.bulk import BulkJob
 from scim2_server.bulk import Resolver
+from scim2_server.conditions import NO_CONDITIONS
+from scim2_server.conditions import Conditions
 from scim2_server.utils import load_default_service_provider_config
 from scim2_server.utils import parametrize
 
@@ -217,39 +215,24 @@ class SCIMApplication:
         return {"ETag": resource.meta.version} if resource.meta.version else {}
 
     def check_preconditions(
-        self,
-        resource: Resource[Any],
-        method: str,
-        if_match: ETags | None = None,
-        if_none_match: ETags | None = None,
+        self, resource: Resource[Any], method: str, conditions: Conditions
     ) -> bool:
-        """Evaluate the "If-Match" and "If-None-Match" conditions against a resource.
-
-        RFC 7232 §6 evaluates "If-Match" first: a failed "If-Match" answers
-        412 whatever the method, a failed "If-None-Match" answers 304 to a GET
-        and 412 otherwise.
+        """Evaluate the conditional headers of a request against a resource.
 
         :return: :data:`False` when a GET should answer 304 Not Modified.
-        :raises PreconditionFailed: When the method must not be performed.
+        :raises PreconditionFailedException: When the method must not be performed.
         """
         assert resource.meta is not None
-        # A service that does not support ETags has no tag to match: RFC 7232
-        # §3.1 fails an If-Match listing tags, and lets "*" pass.
-        version, _ = (
-            unquote_etag(resource.meta.version) if self.etag_supported else (None, None)
+        version = resource.meta.version if self.etag_supported else None
+        return conditions.check(version, method)
+
+    @staticmethod
+    def get_conditions(request: Request) -> Conditions:
+        """Return the conditional headers of a request."""
+        return Conditions(
+            if_match=request.headers.get("If-Match"),
+            if_none_match=request.headers.get("If-None-Match"),
         )
-        version = version or ""
-        # RFC 7232 §3.1 compares If-Match strongly, which would never match
-        # the weak ETags RFC 7644 §3.14 recommends and sends in its example.
-        if if_match and not if_match.contains_weak(version):
-            raise PreconditionFailed
-
-        if if_none_match and if_none_match.contains_weak(version):
-            if method == "GET":
-                return False
-            raise PreconditionFailed
-
-        return True
 
     def get_existing_resource(
         self, resource_type: ResourceType, resource_id: str
@@ -275,12 +258,11 @@ class SCIMApplication:
         resource_type: ResourceType,
         resource_id: str,
         payload: Any,
-        if_match: ETags | None = None,
-        if_none_match: ETags | None = None,
+        conditions: Conditions = NO_CONDITIONS,
     ) -> Resource[Any]:
         """Replace a stored resource with a payload and return the stored result."""
         resource = self.get_existing_resource(resource_type, resource_id)
-        self.check_preconditions(resource, "PUT", if_match, if_none_match)
+        self.check_preconditions(resource, "PUT", conditions)
 
         replacement = self.get_model(resource_type).model_validate(
             payload, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
@@ -295,8 +277,7 @@ class SCIMApplication:
         resource_type: ResourceType,
         resource_id: str,
         payload: Any,
-        if_match: ETags | None = None,
-        if_none_match: ETags | None = None,
+        conditions: Conditions = NO_CONDITIONS,
     ) -> Resource[Any]:
         """Apply a PATCH payload to a stored resource and return the stored result."""
         self.ensure_supported(self.config.patch, "PATCH")
@@ -304,7 +285,7 @@ class SCIMApplication:
             PatchOp, self.get_model(resource_type)
         ).model_validate(payload, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
         resource = self.get_existing_resource(resource_type, resource_id)
-        self.check_preconditions(resource, "PATCH", if_match, if_none_match)
+        self.check_preconditions(resource, "PATCH", conditions)
 
         # A PATCH that changes nothing keeps meta.lastModified and the ETag.
         if not patch_operation.patch(resource):
@@ -327,12 +308,11 @@ class SCIMApplication:
         self,
         resource_type: ResourceType,
         resource_id: str,
-        if_match: ETags | None = None,
-        if_none_match: ETags | None = None,
+        conditions: Conditions = NO_CONDITIONS,
     ) -> None:
         """Delete a stored resource."""
         resource = self.get_existing_resource(resource_type, resource_id)
-        self.check_preconditions(resource, "DELETE", if_match, if_none_match)
+        self.check_preconditions(resource, "DELETE", conditions)
         self.backend.delete_resource(resource_type, resource_id)
 
     def call_single_resource(
@@ -348,7 +328,7 @@ class SCIMApplication:
                     request, self.get_existing_resource(resource_type, resource_id)
                 )
                 if not self.check_preconditions(
-                    resource, "GET", request.if_match, request.if_none_match
+                    resource, "GET", self.get_conditions(request)
                 ):
                     # RFC 7232 §4.1: a 304 carries the ETag a 200 would have
                     return self.make_response(
@@ -365,9 +345,7 @@ class SCIMApplication:
                     )
                 )
             case "DELETE":
-                self.delete(
-                    resource_type, resource_id, request.if_match, request.if_none_match
-                )
+                self.delete(resource_type, resource_id, self.get_conditions(request))
                 return self.make_response(None, 204)
             case "PUT":
                 response_parameters = self.get_response_parameters(
@@ -377,8 +355,7 @@ class SCIMApplication:
                     resource_type,
                     resource_id,
                     request.json,
-                    request.if_match,
-                    request.if_none_match,
+                    self.get_conditions(request),
                 )
                 resource = self.publish(request, resource)
                 return self.make_response(
@@ -395,8 +372,7 @@ class SCIMApplication:
                     resource_type,
                     resource_id,
                     request.json,
-                    request.if_match,
-                    request.if_none_match,
+                    self.get_conditions(request),
                 )
                 resource = self.publish(request, resource)
                 if (
@@ -673,16 +649,18 @@ class SCIMApplication:
         if operation.method == BulkOperation.Method.post or resource_id is None:
             return self.create(resource_type, operation.data)
 
-        if_match = parse_etags(operation.version) if operation.version else None
+        conditions = Conditions(if_match=operation.version)
         match operation.method:
             case BulkOperation.Method.put:
                 return self.replace(
-                    resource_type, resource_id, operation.data, if_match
+                    resource_type, resource_id, operation.data, conditions
                 )
             case BulkOperation.Method.patch:
-                return self.patch(resource_type, resource_id, operation.data, if_match)
+                return self.patch(
+                    resource_type, resource_id, operation.data, conditions
+                )
             case _:  # DELETE
-                self.delete(resource_type, resource_id, if_match)
+                self.delete(resource_type, resource_id, conditions)
                 return None
 
     def call_me(self, request: Request, **kwargs: Any) -> Response:
