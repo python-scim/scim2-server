@@ -9,10 +9,10 @@ from scim2_models import ScimProvider
 from scim2_server.handler import AsyncScimHandler
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
-from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
+from scim2_server.werkzeug import SCIMApplication
 
 
 @pytest.fixture(scope="session")

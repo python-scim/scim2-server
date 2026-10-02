@@ -2,8 +2,8 @@ import httpx2
 import pytest
 
 from scim2_server.memory import InMemoryStorage
-from scim2_server.provider import SCIMApplication
-from scim2_server.tenants import TenantDispatcher
+from scim2_server.werkzeug import SCIMApplication
+from scim2_server.werkzeug import TenantDispatcher
 
 BASE_URL = "https://scim.example.com"
 

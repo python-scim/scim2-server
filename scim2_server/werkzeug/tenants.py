@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from scim2_models import Error
 
-from scim2_server.provider import SCIMApplication
 from scim2_server.responses import ScimResponse
+from scim2_server.werkzeug.app import SCIMApplication
 
 if TYPE_CHECKING:
     from _typeshed.wsgi import StartResponse

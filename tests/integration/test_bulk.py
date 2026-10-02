@@ -9,8 +9,8 @@ from scim2_models import ScimProvider
 from werkzeug.test import EnvironBuilder
 from werkzeug.test import run_wsgi_app
 
-from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_service_provider_config
+from scim2_server.werkzeug import SCIMApplication
 
 BULK_REQUEST = "urn:ietf:params:scim:api:messages:2.0:BulkRequest"
 PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp"

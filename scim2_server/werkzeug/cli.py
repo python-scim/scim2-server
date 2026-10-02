@@ -16,11 +16,11 @@ from scim2_models import ServiceProviderConfig
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from scim2_server.memory import InMemoryStorage
-from scim2_server.provider import SCIMApplication
-from scim2_server.tenants import TenantDispatcher
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
+from scim2_server.werkzeug.app import SCIMApplication
+from scim2_server.werkzeug.tenants import TenantDispatcher
 
 if TYPE_CHECKING:
     from _typeshed.wsgi import StartResponse

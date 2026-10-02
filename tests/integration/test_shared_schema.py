@@ -4,10 +4,10 @@ from scim2_models import ResourceType
 from scim2_models import ScimProvider
 
 from scim2_server.memory import InMemoryStorage
-from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
+from scim2_server.werkzeug import SCIMApplication
 
 USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
 

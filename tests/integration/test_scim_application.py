@@ -15,8 +15,8 @@ from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
 from scim2_models import User
 
-from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_service_provider_config
+from scim2_server.werkzeug import SCIMApplication
 from tests.utils import compare_dicts
 
 

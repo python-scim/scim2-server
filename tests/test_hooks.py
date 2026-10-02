@@ -3,7 +3,7 @@ import pytest
 from scim2_models import Error
 from scim2_models import NotFoundException
 
-from scim2_server.provider import SCIMApplication
+from scim2_server.werkzeug import SCIMApplication
 
 BULK_REQUEST = "urn:ietf:params:scim:api:messages:2.0:BulkRequest"
 

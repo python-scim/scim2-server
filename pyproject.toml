@@ -30,12 +30,14 @@ classifiers = [
 requires-python = ">= 3.11"
 dependencies = [
     "scim2-models>=0.10.3",
-    "werkzeug>=3.0.3",
 ]
 
 [project.optional-dependencies]
 testing = [
     "pytest>=9.1.1",
+]
+werkzeug = [
+    "werkzeug>=3.0.3",
 ]
 
 [project.urls]
@@ -43,7 +45,7 @@ repository = "https://github.com/python-scim/scim2-server"
 funding = "https://github.com/sponsors/python-scim"
 
 [project.scripts]
-scim2-server = "scim2_server.cli:main"
+scim2-server = "scim2_server.werkzeug.cli:main"
 
 [dependency-groups]
 dev = [
@@ -56,6 +58,7 @@ dev = [
     "mypy>=2.3.1",
     "scim2-client[werkzeug]>=0.11.2",
     "scim2-tester>=0.5.1",
+    "werkzeug>=3.0.3",
 ]
 
 [tool.uv]
@@ -81,7 +84,7 @@ source = [
     "scim2_server",
     "tests",
 ]
-omit = [".tox/*", "examples/*", "scim2_server/cli.py"]
+omit = [".tox/*", "examples/*", "scim2_server/werkzeug/cli.py"]
 branch = true
 
 [tool.coverage.report]
