@@ -6,9 +6,6 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 from typing import Any
 
-from scim2_models import AuthenticationScheme
-from scim2_models import External
-from scim2_models import Reference
 from scim2_models import ResourceType
 from scim2_models import Schema
 from scim2_models import ScimProvider
@@ -20,19 +17,13 @@ from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
 from scim2_server.werkzeug.tenants import TenantDispatcher
+from scim2_server.werkzeug.testserver import BEARER_TOKEN_SCHEME
 from scim2_server.werkzeug.testserver import BearerTokenApplication
 
 if TYPE_CHECKING:
     from _typeshed.wsgi import StartResponse
     from _typeshed.wsgi import WSGIApplication
     from _typeshed.wsgi import WSGIEnvironment
-
-BEARER_TOKEN_SCHEME = AuthenticationScheme(
-    type=AuthenticationScheme.Type.oauthbearertoken,
-    name="bearer_token",
-    description="HTTP Bearer Token",
-    spec_uri=Reference[External]("https://datatracker.ietf.org/doc/html/rfc6750"),
-)
 
 
 def log_environ(handler: "WSGIApplication") -> "WSGIApplication":

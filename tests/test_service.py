@@ -2,9 +2,12 @@ import asyncio
 
 import pytest
 from pydantic import ValidationError
+from scim2_models import AuthenticationScheme
+from scim2_models import ForbiddenException
 from scim2_models import NotFoundException
 from scim2_models import SCIMException
 from scim2_models import SearchRequest
+from scim2_models import UnauthorizedException
 
 from scim2_server.conditions import NO_CONDITIONS
 from scim2_server.handler import AsyncScimHandler
@@ -13,6 +16,7 @@ from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
 from scim2_server.service import ScimService
 from scim2_server.service import is_json_media_type
+from scim2_server.utils import load_default_provider
 
 
 @pytest.mark.parametrize(
@@ -103,3 +107,56 @@ def test_an_invalid_request_raises_a_scim_exception_asynchronously(
         asyncio.run(request_of(handler))
 
     assert excinfo.value.status == 400
+
+
+def scheme(type):
+    return AuthenticationScheme(type=type, name=type, description=type)
+
+
+def service_announcing(*types):
+    provider = load_default_provider()
+    provider.config.authentication_schemes = [scheme(type) for type in types]
+    return ScimService(provider)
+
+
+@pytest.mark.parametrize(
+    ("types", "challenge"),
+    [
+        (["oauthbearertoken"], 'Bearer realm="SCIM"'),
+        (["oauth2", "oauthbearertoken"], 'Bearer realm="SCIM"'),
+        (["httpbasic", "oauthbearertoken"], 'Basic realm="SCIM", Bearer realm="SCIM"'),
+    ],
+)
+def test_a_401_announces_the_authentication_schemes(types, challenge):
+    """A 401 response carries one challenge per announced Bearer or Basic scheme."""
+    result = service_announcing(*types).error_response(UnauthorizedException())
+
+    assert result.status == 401
+    assert result.headers["WWW-Authenticate"] == challenge
+
+
+@pytest.mark.parametrize("types", [[], ["httpdigest", "oauth"]])
+def test_a_401_without_known_scheme_has_no_challenge(types):
+    """A 401 response has no WWW-Authenticate header when no Bearer or Basic scheme is announced."""
+    result = service_announcing(*types).error_response(UnauthorizedException())
+
+    assert "WWW-Authenticate" not in result.headers
+
+
+def test_only_a_401_announces_the_schemes():
+    """A 403 response carries no WWW-Authenticate header."""
+    result = service_announcing("oauthbearertoken").error_response(ForbiddenException())
+
+    assert "WWW-Authenticate" not in result.headers
+
+
+def test_the_challenge_can_be_overridden(scim_provider):
+    """A subclass of the service builds its own challenge, such as an RFC 9728 one."""
+
+    class MetadataService(ScimService):
+        def www_authenticate(self, exception):
+            return 'Bearer resource_metadata="https://scim.example/.well-known/oauth-protected-resource"'
+
+    result = MetadataService(scim_provider).error_response(UnauthorizedException())
+
+    assert result.headers["WWW-Authenticate"].startswith("Bearer resource_metadata=")

@@ -2,20 +2,31 @@
 
 from collections.abc import Iterable
 
+from scim2_models import AuthenticationScheme
+from scim2_models import External
+from scim2_models import Reference
 from scim2_models import ScimProvider
 from werkzeug import Request
-from werkzeug import Response
 from werkzeug.exceptions import Unauthorized
 
 from scim2_server.service import ScimService
 from scim2_server.storage import ScimStorage
 from scim2_server.werkzeug.app import SCIMApplication
 
+BEARER_TOKEN_SCHEME = AuthenticationScheme(
+    type=AuthenticationScheme.Type.oauthbearertoken,
+    name="bearer_token",
+    description="HTTP Bearer Token",
+    spec_uri=Reference[External]("https://datatracker.ietf.org/doc/html/rfc6750"),
+)
+
 
 class BearerTokenApplication(SCIMApplication):
     """A SCIM application that only accepts static bearer tokens.
 
-    Without token, it accepts every request.
+    Without token, it accepts every request. List
+    :data:`BEARER_TOKEN_SCHEME` in the service provider configuration, so
+    that the 401 responses carry a ``WWW-Authenticate`` header.
     """
 
     def __init__(
@@ -37,11 +48,3 @@ class BearerTokenApplication(SCIMApplication):
             or request.authorization.token not in self.bearer_tokens
         ):
             raise Unauthorized
-
-    def finalize_response(self, request: Request, response: Response) -> Response:
-        """Announce the bearer scheme to a client that sent no credentials."""
-        response = super().finalize_response(request, response)
-        if self.bearer_tokens and not request.authorization:
-            # RFC 7644 §2
-            response.headers.add("WWW-Authenticate", 'Bearer realm="SCIM Provider"')
-        return response
