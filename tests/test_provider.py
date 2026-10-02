@@ -1,9 +1,13 @@
 from unittest.mock import patch
 
+import httpx2
 import pytest
 from scim2_models import Context
 from scim2_models import NotFoundException
 from werkzeug.exceptions import HTTPException
+
+from scim2_server.provider import SCIMApplication
+from scim2_server.service import ScimService
 
 
 class TestProvider:
@@ -144,3 +148,22 @@ def test_a_resource_of_an_unknown_type_from_the_storage(app, wsgi, first_fake_us
         r = wsgi.get("/v2/Users")
 
     assert r.status_code == 500
+
+
+def test_a_given_service_serves_the_requests(storage, scim_provider):
+    """The service passed to the application builds its responses."""
+
+    class ElsewhereService(ScimService):
+        def resource_location(self, base_url, resource_type, resource_id):
+            return f"https://ids.example/{resource_type.id}/{resource_id}"
+
+    app = SCIMApplication(
+        storage, scim_provider, service=ElsewhereService(scim_provider)
+    )
+    with httpx2.Client(
+        transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
+    ) as client:
+        r = client.post("/v2/Users", json={"userName": "bjensen"})
+
+    assert r.headers["Location"] == f"https://ids.example/User/{r.json()['id']}"
+    assert r.json()["meta"]["location"] == r.headers["Location"]

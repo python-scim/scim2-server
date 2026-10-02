@@ -3,9 +3,9 @@ from typing import Any
 
 from pydantic import BaseModel
 from scim2_models import BulkOperation
+from scim2_models import ConflictException
 from scim2_models import InvalidValueException
 from scim2_models import Resource
-from werkzeug.exceptions import Conflict
 
 BULK_ID_PREFIX = "bulkId:"
 
@@ -162,7 +162,7 @@ class BulkJob:
     ) -> BulkOperation[Resource[Any]]:
         """Replace the bulkId references of an operation with the identifiers of the created resources.
 
-        :raises Conflict: When a referenced resource was not created, as
+        :raises ConflictException: When a referenced resource was not created, as
             RFC 7644 §3.7.1 allows for circular references.
         """
         if (
@@ -178,7 +178,11 @@ class BulkJob:
             if bulk_id in self.created:
                 return str(self.created[bulk_id].id)
             if self.creations.get(bulk_id) in self.running:
-                raise Conflict(f"The bulkId {bulk_id} is part of a circular reference")
-            raise Conflict(f"No resource was created with the bulkId {bulk_id}")
+                raise ConflictException(
+                    detail=f"The bulkId {bulk_id} is part of a circular reference"
+                )
+            raise ConflictException(
+                detail=f"No resource was created with the bulkId {bulk_id}"
+            )
 
         return resolve_operation(operation, replace)
