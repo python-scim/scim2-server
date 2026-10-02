@@ -10,8 +10,8 @@ from scim2_models import PatchOp
 from scim2_models import Resource
 from scim2_models import ResourceType
 
-from scim2_server.bulk import BulkJob
-from scim2_server.bulk import Resolver
+from scim2_server.bulk import BulkPlan
+from scim2_server.bulk import BulkStep
 from scim2_server.conditions import NO_CONDITIONS
 from scim2_server.conditions import Conditions
 from scim2_server.responses import ScimResponse
@@ -232,39 +232,30 @@ class ScimHandler:
     ) -> ScimResponse:
         """Run a bulk request (RFC 7644 §3.7)."""
         with self.service.provider:
-            bulk_request = self.service.read_bulk(body, content_type)
-            operations = cast(
-                list[BulkOperation[Resource[Any]]], bulk_request.operations or []
-            )
-            results = BulkJob(
-                operations,
-                bulk_request.fail_on_errors,
-                lambda operation, resolve: self.run_bulk_operation(
-                    base_url, operation, resolve
-                ),
-            ).run()
-            return self.service.bulk_response(results)
+            plan = self.service.read_bulk(body, content_type)
+            for step in plan:
+                result, resource = self.run_bulk_step(base_url, plan, step)
+                plan.record(step, result, resource)
+            return self.service.bulk_response(plan)
 
-    def run_bulk_operation(
-        self,
-        base_url: str,
-        operation: BulkOperation[Resource[Any]],
-        resolve: Resolver,
+    def run_bulk_step(
+        self, base_url: str, plan: BulkPlan, step: BulkStep
     ) -> tuple[dict[str, Any], Resource[Any] | None]:
-        """Apply one operation of a bulk request.
+        """Apply one step of a bulk request.
 
         An operation that failed its validation keeps its error, once its
         references are resolved to locate it.
 
-        :return: The outcome of the operation, and the resource it created or updated.
+        :return: The outcome of the step, and the resource it created or updated.
         """
+        operation = plan.operation(step)
         result: dict[str, Any] = {
             "method": operation.method,
             "bulk_id": operation.bulk_id,
         }
 
         try:
-            operation = resolve(operation)
+            operation = plan.resolve(step)
             resource_type = self.service.get_resource_type_by_endpoint(
                 operation.endpoint or ""
             )

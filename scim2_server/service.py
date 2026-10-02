@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from pydantic_core import from_json
 from scim2_models import BaseModel
 from scim2_models import Bulk
+from scim2_models import BulkOperation
 from scim2_models import BulkRequest
 from scim2_models import BulkResponse
 from scim2_models import Context
@@ -33,6 +34,7 @@ from scim2_models import SearchRequest
 from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
 
+from scim2_server.bulk import BulkPlan
 from scim2_server.conditions import Conditions
 from scim2_server.errors import UnsupportedMediaTypeException
 from scim2_server.responses import ScimResponse
@@ -509,8 +511,8 @@ class ScimService:
 
     # -- Bulk -----------------------------------------------------------
 
-    def read_bulk(self, body: bytes, content_type: str | None) -> "BulkRequest[Any]":
-        """Validate a bulk request against the limits of the service (RFC 7644 §3.7)."""
+    def read_bulk(self, body: bytes, content_type: str | None) -> BulkPlan:
+        """Validate a bulk request against the limits of the service, and plan its operations (RFC 7644 §3.7)."""
         self.ensure_supported(self.config.bulk, "Bulk")
         bulk = cast(Bulk, self.config.bulk)
         self.ensure_bulk_payload_size(len(body))
@@ -526,14 +528,17 @@ class ScimService:
             raise PayloadTooLargeException(
                 detail=f"The number of operations exceeds the maxOperations ({bulk.max_operations})"
             )
-        return bulk_request
+        return BulkPlan(
+            cast(list[BulkOperation[Resource[Any]]], operations),
+            bulk_request.fail_on_errors,
+        )
 
-    def bulk_response(self, results: list[dict[str, Any]]) -> ScimResponse:
-        """Return the response listing the outcome of each operation of a bulk request."""
+    def bulk_response(self, plan: BulkPlan) -> ScimResponse:
+        """Return the response listing the outcome of each operation that ran."""
         response = parametrize(BulkResponse, Union[tuple(self.get_models())])  # noqa: UP007
         return ScimResponse(
             HTTPStatus.OK,
-            response.model_validate({"operations": results}).model_dump(
+            response.model_validate({"operations": plan.outcomes()}).model_dump(
                 scim_ctx=Context.BULK_RESPONSE
             ),
         )
