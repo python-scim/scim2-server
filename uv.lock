@@ -890,7 +890,6 @@ version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "scim2-models" },
-    { name = "werkzeug" },
 ]
 
 [package.optional-dependencies]
@@ -909,13 +908,13 @@ dev = [
     { name = "scim2-tester" },
     { name = "time-machine" },
     { name = "tox-uv" },
+    { name = "werkzeug" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "scim2-models", specifier = ">=0.10.3" },
-    { name = "werkzeug", specifier = ">=3.0.3" },
 ]
 provides-extras = ["testing"]
 
@@ -930,6 +929,7 @@ dev = [
     { name = "scim2-tester", specifier = ">=0.5.1" },
     { name = "time-machine", specifier = ">=2.14.2" },
     { name = "tox-uv", specifier = ">=1.16.0" },
+    { name = "werkzeug", specifier = ">=3.0.3" },
 ]
 
 [[package]]

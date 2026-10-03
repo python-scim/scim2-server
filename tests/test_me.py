@@ -7,11 +7,11 @@ from scim2_models import NotFoundException
 from scim2_models import SCIMException
 from scim2_models import UnauthorizedException
 
+from scim2_server.applications.wsgi import WSGIApplication
 from scim2_server.handler import AsyncScimHandler
 from scim2_server.handler import ScimHandler
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
-from scim2_server.provider import SCIMApplication
 from scim2_server.requests import ScimRequest
 from scim2_server.service import ScimService
 
@@ -132,11 +132,11 @@ def test_me_is_not_implemented_by_default(scim_provider, method):
 
 
 def test_the_application_passes_its_subject(storage, scim_provider):
-    """The subject that SCIMApplication returns is passed to the service."""
+    """The subject that WSGIApplication returns is passed to the service."""
 
-    class MeApplication(SCIMApplication):
+    class MeApplication(WSGIApplication):
         def get_subject(self, request):
-            user_id = request.headers.get("X-User")
+            user_id = request.header("X-User")
             return None if user_id is None else ("User", user_id)
 
     app = MeApplication(storage, scim_provider, service=MeService(scim_provider))

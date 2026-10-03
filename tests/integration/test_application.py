@@ -15,13 +15,13 @@ from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
 from scim2_models import User
 
-from scim2_server.provider import SCIMApplication
+from scim2_server.applications.wsgi import WSGIApplication
 from scim2_server.utils import load_default_service_provider_config
 from tests.utils import compare_dicts
 
 
-class TestSCIMApplication:
-    """End-to-end tests for the SCIMApplication."""
+class TestApplication:
+    """End-to-end tests for the WSGIApplication."""
 
     def test_location_mapping(self, app):
         transport = httpx2.WSGITransport(app=app, script_name="/foo/bar")
@@ -100,10 +100,12 @@ class TestSCIMApplication:
         }
 
     def test_no_version_prefix(self, wsgi):
-        """Test a location without the /v2 version prefix."""
+        """A request without the /v2 version prefix is served, with the locations of the /v2 prefix."""
         r = wsgi.get("/ServiceProviderConfig")
         assert r.status_code == 200
-        assert r.headers["Location"] == "https://scim.example.com/ServiceProviderConfig"
+        assert (
+            r.headers["Location"] == "https://scim.example.com/v2/ServiceProviderConfig"
+        )
         assert r.json() == {
             "authenticationSchemes": [],
             "bulk": {
@@ -134,7 +136,7 @@ class TestSCIMApplication:
             etag=ETag(supported=False),
         )
         provider = ScimProvider(models=[User], config=config)
-        transport = httpx2.WSGITransport(app=SCIMApplication(storage, provider))
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
@@ -145,7 +147,7 @@ class TestSCIMApplication:
     def test_service_provider_configuration_defaults(self, storage):
         """A provider carrying no configuration is served the default one."""
         provider = ScimProvider(models=[User])
-        transport = httpx2.WSGITransport(app=SCIMApplication(storage, provider))
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
@@ -1096,13 +1098,12 @@ class TestSCIMApplication:
         assert j["meta"]["created"] == "2024-03-14T06:00:00Z"
         assert j["meta"]["lastModified"] == "2024-03-16T08:30:00Z"
 
-    def test_redirect(self, wsgi):
-        r = wsgi.get("/v2", follow_redirects=False)
-        assert r.is_redirect
-        assert r.headers["Location"] == "https://scim.example.com/v2/"
+    def test_version_prefix_without_trailing_slash(self, wsgi):
+        """The /v2 prefix alone is the root of the SCIM endpoints, with or without a trailing slash."""
+        assert wsgi.get("/v2").json() == wsgi.get("/v2/").json()
 
 
-class TestSCIMApplicationPolicy:
+class TestApplicationPolicy:
     def test_undeclared_attribute_is_refused_by_default(self, wsgi):
         """The default policy follows the strict reading and refuses what no schema declares."""
         r = wsgi.post(

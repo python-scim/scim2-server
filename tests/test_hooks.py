@@ -1,15 +1,18 @@
+from http import HTTPStatus
+
 import httpx2
 import pytest
 from scim2_models import Error
 from scim2_models import NotFoundException
-from werkzeug.exceptions import Unauthorized
+from scim2_models import UnauthorizedException
 
-from scim2_server.provider import SCIMApplication
+from scim2_server.applications.wsgi import WSGIApplication
+from scim2_server.responses import ScimResponse
 
 BULK_REQUEST = "urn:ietf:params:scim:api:messages:2.0:BulkRequest"
 
 
-class RecordingApplication(SCIMApplication):
+class RecordingApplication(WSGIApplication):
     """An application that records what its hooks receive."""
 
     def __init__(self, *args, **kwargs):
@@ -18,16 +21,16 @@ class RecordingApplication(SCIMApplication):
         self.exceptions = []
         self.responses = []
 
-    def dispatch_request(self, request, endpoint, args):
-        self.dispatched.append((endpoint, dict(args)))
-        return super().dispatch_request(request, endpoint, args)
+    def dispatch_request(self, request):
+        self.dispatched.append((request.method, request.path))
+        return super().dispatch_request(request)
 
     def handle_exception(self, request, exception):
         self.exceptions.append(exception)
         return super().handle_exception(request, exception)
 
-    def wsgi_app(self, request, environ):
-        response = super().wsgi_app(request, environ)
+    def serve(self, request):
+        response = super().serve(request)
         self.responses.append(response)
         return response
 
@@ -37,49 +40,38 @@ def recording_app(storage, scim_provider):
     return RecordingApplication(storage, scim_provider)
 
 
+def client_of(app):
+    return httpx2.Client(
+        transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
+    )
+
+
 @pytest.fixture
 def client(recording_app):
-    transport = httpx2.WSGITransport(app=recording_app)
-    with httpx2.Client(
-        transport=transport, base_url="https://scim.example.com"
-    ) as client:
+    with client_of(recording_app) as client:
         yield client
 
 
-def test_dispatch_request_receives_the_endpoint_and_the_path_arguments(
-    client, recording_app
-):
-    """The endpoint and the path arguments of a request are passed to dispatch_request."""
+def test_dispatch_request_receives_the_scim_request(client, recording_app):
+    """The method and the path of a request, relative to the SCIM root, are passed to dispatch_request."""
     client.get("/v2/Users/unknown")
 
-    assert recording_app.dispatched == [
-        ("query", {"endpoint": "Users", "resource_id": "unknown"})
-    ]
+    assert recording_app.dispatched == [("GET", "/Users/unknown")]
 
 
 def test_dispatch_request_can_answer_in_place_of_the_endpoint(storage, scim_provider):
     """A response returned by dispatch_request is sent instead of the endpoint response."""
 
-    class ThrottledApplication(SCIMApplication):
-        def dispatch_request(self, request, endpoint, args):
-            return self.make_error(Error(status=429, detail="Too many requests"))
+    class ThrottledApplication(WSGIApplication):
+        def dispatch_request(self, request):
+            error = Error(status=429, detail="Too many requests")
+            return ScimResponse(HTTPStatus.TOO_MANY_REQUESTS, error.model_dump())
 
-    app = ThrottledApplication(storage, scim_provider)
-    with httpx2.Client(
-        transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
-    ) as client:
+    with client_of(ThrottledApplication(storage, scim_provider)) as client:
         r = client.get("/v2/Users")
 
     assert r.status_code == 429
-    assert r.headers["Location"] == "https://scim.example.com/v2/Users"
-
-
-def test_dispatch_request_is_not_called_for_an_unrouted_request(client, recording_app):
-    """A request matching no endpoint is answered without dispatch_request."""
-    r = client.delete("/v2/Schemas")
-
-    assert r.status_code == 405
-    assert recording_app.dispatched == []
+    assert r.json()["detail"] == "Too many requests"
 
 
 def test_handle_exception_receives_the_exception_of_the_request(client, recording_app):
@@ -108,20 +100,19 @@ def test_handle_exception_is_not_called_for_a_failed_bulk_operation(
     assert recording_app.exceptions == []
 
 
-def test_wsgi_app_returns_the_response_sent_to_the_client(storage, scim_provider):
-    """The response returned by wsgi_app carries the headers added to every response."""
+def test_serve_returns_the_response_sent_to_the_client(storage, scim_provider):
+    """The response returned by serve carries the headers added to every response."""
 
     class RefusingApplication(RecordingApplication):
         def check_auth(self, request):
-            raise Unauthorized
+            raise UnauthorizedException
 
     app = RefusingApplication(storage, scim_provider)
-    transport = httpx2.WSGITransport(app=app)
-    with httpx2.Client(transport=transport, base_url="https://scim.example.com") as c:
-        c.get("/v2/Users")
+    with client_of(app) as client:
+        client.get("/v2/Users")
 
     (response,) = app.responses
-    assert response.status_code == 401
+    assert response.status == 401
     assert response.headers["Location"] == "https://scim.example.com/v2/Users"
 
 
@@ -130,24 +121,21 @@ def test_wsgi_app_returns_the_response_sent_to_the_client(storage, scim_provider
     [
         ("/v2/ServiceProviderConfig", 200),
         ("/v2/Users/unknown", 404),
-        ("/v2", 308),
+        ("/v2/Unknown/path/to/nothing", 404),
     ],
 )
 def test_finalize_response_receives_every_response(
     storage, scim_provider, path, status
 ):
-    """Successful, error and redirect responses all go through finalize_response."""
+    """Successful and error responses all go through finalize_response."""
 
-    class TaggingApplication(SCIMApplication):
+    class TaggingApplication(WSGIApplication):
         def finalize_response(self, request, response):
             response.headers["X-Finalized"] = "yes"
             return super().finalize_response(request, response)
 
-    app = TaggingApplication(storage, scim_provider)
-    with httpx2.Client(
-        transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
-    ) as client:
-        r = client.get(path, follow_redirects=False)
+    with client_of(TaggingApplication(storage, scim_provider)) as client:
+        r = client.get(path)
 
     assert r.status_code == status
     assert r.headers["X-Finalized"] == "yes"

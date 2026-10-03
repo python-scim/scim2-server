@@ -17,7 +17,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 USER nobody
 EXPOSE 8080
-# Werkzeug stops gracefully on KeyboardInterrupt, which lets --dump-resources be written.
+# The server stops gracefully on KeyboardInterrupt, which lets --dump-resources be written.
 STOPSIGNAL SIGINT
 ENTRYPOINT ["scim2-server", "--hostname", "0.0.0.0"]
 CMD ["--port", "8080"]

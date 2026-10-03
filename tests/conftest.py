@@ -6,10 +6,10 @@ import httpx2
 import pytest
 from scim2_models import ScimProvider
 
+from scim2_server.applications.wsgi import WSGIApplication
 from scim2_server.handler import AsyncScimHandler
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
-from scim2_server.provider import SCIMApplication
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
@@ -64,7 +64,7 @@ class BlockingHandler:
 @pytest.fixture(params=["sync", "async"])
 def app(request, storage, scim_provider):
     """Return a SCIM application, served by the synchronous handler, then by the asynchronous one."""
-    app = SCIMApplication(storage, scim_provider)
+    app = WSGIApplication(storage, scim_provider)
     if request.param == "async":
         app.handler = BlockingHandler(
             AsyncScimHandler(app.service, AsyncInMemoryStorage(storage))
@@ -94,7 +94,7 @@ def wsgi_with(storage, scim_provider):
             config=config or scim_provider.config,
             policy=policy,
         )
-        transport = httpx2.WSGITransport(app=SCIMApplication(storage, provider))
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
         clients.append(client)
         return client

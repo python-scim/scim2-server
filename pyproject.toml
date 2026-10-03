@@ -30,7 +30,6 @@ classifiers = [
 requires-python = ">= 3.11"
 dependencies = [
     "scim2-models>=0.10.3",
-    "werkzeug>=3.0.3",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +55,7 @@ dev = [
     "mypy>=2.3.1",
     "scim2-client[werkzeug]>=0.11.2",
     "scim2-tester>=0.5.1",
+    "werkzeug>=3.0.3",
 ]
 
 [tool.uv]
