@@ -93,7 +93,3 @@ class Conditions:
             raise PreconditionFailedException
 
         return True
-
-
-NO_CONDITIONS = Conditions()
-"""The conditions of a request without conditional header."""

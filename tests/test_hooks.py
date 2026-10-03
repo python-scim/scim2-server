@@ -53,7 +53,7 @@ def test_dispatch_request_receives_the_endpoint_and_the_path_arguments(
     client.get("/v2/Users/unknown")
 
     assert recording_app.dispatched == [
-        ("single_resource", {"resource_endpoint": "Users", "resource_id": "unknown"})
+        ("query", {"endpoint": "Users", "resource_id": "unknown"})
     ]
 
 

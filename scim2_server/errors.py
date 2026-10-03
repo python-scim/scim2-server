@@ -1,3 +1,6 @@
+from collections.abc import Iterable
+from typing import Any
+
 from scim2_models import SCIMException
 
 
@@ -11,3 +14,20 @@ class UnsupportedMediaTypeException(SCIMException):
 
     status = 415
     _default_detail = "The request body must be application/scim+json"
+
+
+class MethodNotAllowedException(SCIMException):
+    """The endpoint does not support the method of the request.
+
+    Corresponds to HTTP status 405, with no scimType. The response lists the
+    supported methods in its ``Allow`` header (RFC 9110 §15.5.6).
+
+    :param allowed: The methods the endpoint supports.
+    """
+
+    status = 405
+    _default_detail = "The endpoint does not support this method"
+
+    def __init__(self, *, allowed: Iterable[str] = (), **kwargs: Any):
+        super().__init__(**kwargs)
+        self.allowed = sorted(set(allowed))

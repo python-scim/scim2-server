@@ -115,7 +115,7 @@ class TestSCIMApplication:
             "etag": {"supported": True},
             "filter": {"maxResults": 1000, "supported": True},
             "meta": {
-                "location": "https://scim.example.com/ServiceProviderConfig",
+                "location": "https://scim.example.com/v2/ServiceProviderConfig",
                 "resourceType": "ServiceProviderConfig",
             },
             "patch": {"supported": True},

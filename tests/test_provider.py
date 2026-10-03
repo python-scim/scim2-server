@@ -48,8 +48,8 @@ class TestProvider:
 
         # Mock to force a generic exception during request processing
         with patch.object(
-            app,
-            "call_service_provider_config",
+            app.service,
+            "service_provider_config",
             side_effect=RuntimeError("Test error"),
         ):
             response = app.wsgi_app(request, environ)
@@ -90,8 +90,8 @@ class TestProvider:
     def test_http_exception_without_status_code(self, app, wsgi):
         """An HTTP exception without status code answers 500."""
         with patch.object(
-            app,
-            "call_service_provider_config",
+            app.service,
+            "service_provider_config",
             side_effect=HTTPException("Something went wrong"),
         ):
             r = wsgi.get("/v2/ServiceProviderConfig")

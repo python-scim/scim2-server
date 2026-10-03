@@ -38,8 +38,13 @@ from scim2_models import Sort
 
 from scim2_server.bulk import BulkPlan
 from scim2_server.conditions import Conditions
+from scim2_server.errors import MethodNotAllowedException
 from scim2_server.errors import UnsupportedMediaTypeException
+from scim2_server.requests import ScimRequest
 from scim2_server.responses import ScimResponse
+from scim2_server.routing import Operation
+from scim2_server.routing import Target
+from scim2_server.routing import match
 from scim2_server.utils import load_default_service_provider_config
 from scim2_server.utils import parametrize
 
@@ -133,6 +138,46 @@ class ScimService:
             ),
             None,
         )
+
+    # -- Requests -------------------------------------------------------
+
+    def route(self, request: ScimRequest, operation: Operation | None = None) -> Target:
+        """Return the operation a request asks for, and what it acts on (RFC 7644 §3.2).
+
+        :param operation: The operation the caller serves. A request for
+            another operation is a routing error of the integration.
+        :raises ~scim2_models.NotFoundException: When no endpoint has the path
+            of the request.
+        :raises ~scim2_server.errors.MethodNotAllowedException: When the
+            endpoint does not support the method of the request.
+        :raises ~scim2_models.NotImplementedException: For ``/Me``.
+        """
+        target = match(request.method.upper(), request.path)
+        if operation is not None and target.operation is not operation:
+            raise RuntimeError(
+                f"{request.method} {request.path} asks for {target.operation.value}, "
+                f"not for {operation.value}"
+            )
+        return target
+
+    @staticmethod
+    def read_conditions(request: ScimRequest) -> Conditions:
+        """Return the conditional headers of a request."""
+        return Conditions(
+            if_match=request.header("If-Match"),
+            if_none_match=request.header("If-None-Match"),
+        )
+
+    def max_body_size(self, request: ScimRequest) -> int | None:
+        """Return the largest body the service accepts for a request, in bytes.
+
+        An integration reads at most one byte more, and leaves the 413 answer to
+        the service. A bulk request is limited by maxPayloadSize (RFC 7644
+        §3.7.4). Other requests have no limit.
+        """
+        if self.route(request).operation is Operation.bulk:
+            return self.bulk_max_payload_size()
+        return None
 
     def resource_type_at(self, endpoint: str) -> ResourceType:
         """Return the resource type an endpoint serves.
@@ -752,6 +797,9 @@ class ScimService:
         """
         error = self.error_of(exception)
         response = ScimResponse(HTTPStatus(error.status or 500), error.model_dump())
+        if isinstance(exception, MethodNotAllowedException):
+            # RFC 9110 §15.5.6: a 405 answer lists the supported methods.
+            response.headers["Allow"] = ", ".join(exception.allowed)
         if isinstance(exception, SCIMException) and exception.status == 401:
             challenge = self.www_authenticate(exception)
             if challenge:
