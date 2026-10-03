@@ -184,14 +184,20 @@ class SCIMApplication:
     def scim_exception_from(self, exception: Exception) -> Exception:
         """Log an exception raised while serving a request, and return it as a SCIM exception.
 
-        A werkzeug HTTP error keeps its status. Other exceptions are returned
-        unchanged.
+        A SCIM or werkzeug HTTP error answers the client: it is logged at the
+        INFO level, without traceback. A werkzeug HTTP error keeps its status.
+        Any other exception is a bug: it is logged at the ERROR level, with its
+        traceback, and returned unchanged.
         """
-        self.log.exception(exception)
         if isinstance(exception, HTTPException):
+            self.log.info("%s", exception)
             return SCIMException.from_error(
                 Error(status=exception.code, detail=exception.description)
             )
+        if isinstance(exception, SCIMException):
+            self.log.info("%s %s", exception.status, exception)
+            return exception
+        self.log.exception(exception)
         return exception
 
     def make_error(self, error: Error) -> Response:
@@ -209,7 +215,6 @@ class SCIMApplication:
             response = self.dispatch_request(request, endpoint, args)
         except RequestRedirect as e:
             # urls.match may cause a redirect, handle it as a special case of HTTPException
-            self.log.exception(e)
             response = e.get_response(environ)
         except Exception as e:
             response = self.handle_exception(request, e)
