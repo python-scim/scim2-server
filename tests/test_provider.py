@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import patch
 
 import httpx2
@@ -167,3 +168,36 @@ def test_a_given_service_serves_the_requests(storage, scim_provider):
 
     assert r.headers["Location"] == f"https://ids.example/User/{r.json()['id']}"
     assert r.json()["meta"]["location"] == r.headers["Location"]
+
+
+def test_a_client_error_is_logged_without_traceback(wsgi, caplog):
+    """An error of the client is logged at the INFO level, without traceback."""
+    with caplog.at_level(logging.INFO, logger="SCIMApplication"):
+        wsgi.get("/v2/Users/unknown")
+
+    (record,) = caplog.records
+    assert record.levelno == logging.INFO
+    assert record.exc_info is None
+    assert "404" in record.getMessage()
+
+
+def test_an_http_error_is_logged_without_traceback(wsgi, caplog):
+    """A werkzeug HTTP error, such as an unknown URL, is logged at the INFO level, without traceback."""
+    with caplog.at_level(logging.INFO, logger="SCIMApplication"):
+        wsgi.get("/unknown/path/to/nothing")
+
+    (record,) = caplog.records
+    assert record.levelno == logging.INFO
+    assert record.exc_info is None
+
+
+def test_an_unexpected_error_is_logged_with_its_traceback(app, wsgi, caplog):
+    """An unexpected exception is logged at the ERROR level, with its traceback."""
+    with patch.object(
+        app.service, "service_provider_config", side_effect=RuntimeError("boom")
+    ):
+        wsgi.get("/v2/ServiceProviderConfig")
+
+    (record,) = caplog.records
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
