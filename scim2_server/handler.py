@@ -34,20 +34,25 @@ class ScimHandler:
         self.storage = storage
 
     def handle(self, request: ScimRequest) -> ScimResponse:
-        """Serve a request with the method of its operation (RFC 7644 §3.2).
+        """Serve a request with the method of its operation (:rfc:`RFC 7644 §3.2 <7644#section-3.2>`).
 
-        It answers 404 to an unknown path, 405 to a method the endpoint does
-        not support, and 501 to ``/Me``.
+        :raises ~scim2_models.NotFoundException: When the path matches no
+            route.
+        :raises ~scim2_server.errors.MethodNotAllowedException: When the
+            endpoint does not support the method.
+        :raises ~scim2_models.NotImplementedException: When the request is
+            on ``/Me`` and the service does not override
+            :meth:`~scim2_server.service.ScimService.me_target`.
         """
         with self.service.provider:
-            target = self.service.route(request)
+            target = self.service.match(request)
         response: ScimResponse = getattr(self, target.operation.value)(request)
         return response
 
     # -- Resources ------------------------------------------------------
 
     def create(self, request: ScimRequest) -> ScimResponse:
-        """Create a resource (RFC 7644 §3.3)."""
+        """Create a resource (:rfc:`RFC 7644 §3.3 <7644#section-3.3>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.create)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -59,7 +64,7 @@ class ScimHandler:
             return self.service.creation_response(request.base_url, created)
 
     def query(self, request: ScimRequest) -> ScimResponse:
-        """Read a resource (RFC 7644 §3.4.1)."""
+        """Read a resource (:rfc:`RFC 7644 §3.4.1 <7644#section-3.4.1>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.query)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -70,15 +75,16 @@ class ScimHandler:
                 resource = self.storage.get(
                     resource_type, cast(str, target.resource_id)
                 )
-            return self.service.query_response(
+            response = self.service.query_response(
                 request.base_url,
                 resource,
                 response_parameters,
                 self.service.read_conditions(request),
             )
+            return self.service.me_response(request, target, response)
 
     def replace(self, request: ScimRequest) -> ScimResponse:
-        """Replace a resource (RFC 7644 §3.5.1)."""
+        """Replace a resource (:rfc:`RFC 7644 §3.5.1 <7644#section-3.5.1>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.replace)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -96,12 +102,13 @@ class ScimHandler:
                     replacement,
                     self.service.read_conditions(request),
                 )
-            return self.service.replacement_response(
+            response = self.service.replacement_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     def patch(self, request: ScimRequest) -> ScimResponse:
-        """Modify a resource (RFC 7644 §3.5.2)."""
+        """Modify a resource (:rfc:`RFC 7644 §3.5.2 <7644#section-3.5.2>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.patch)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -118,12 +125,13 @@ class ScimHandler:
                     patch_op,
                     self.service.read_conditions(request),
                 )
-            return self.service.patch_response(
+            response = self.service.patch_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     def delete(self, request: ScimRequest) -> ScimResponse:
-        """Delete a resource (RFC 7644 §3.6)."""
+        """Delete a resource (:rfc:`RFC 7644 §3.6 <7644#section-3.6>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.delete)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -133,7 +141,9 @@ class ScimHandler:
                     cast(str, target.resource_id),
                     self.service.read_conditions(request),
                 )
-            return self.service.deletion_response()
+            return self.service.me_response(
+                request, target, self.service.deletion_response()
+            )
 
     def replace_resource(
         self,
@@ -180,7 +190,7 @@ class ScimHandler:
     # -- Search ---------------------------------------------------------
 
     def search(self, request: ScimRequest) -> ScimResponse:
-        """Search with GET, on a resource type or at the root (RFC 7644 §3.4.2)."""
+        """Search with GET, on a resource type or at the root (:rfc:`RFC 7644 §3.4.2 <7644#section-3.4.2>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.search)
             resource_types = self.service.searched_types(target.endpoint)
@@ -194,7 +204,7 @@ class ScimHandler:
             )
 
     def search_with_body(self, request: ScimRequest) -> ScimResponse:
-        """Search with POST on ".search", on a resource type or at the root (RFC 7644 §3.4.3)."""
+        """Search with POST on ".search", on a resource type or at the root (:rfc:`RFC 7644 §3.4.3 <7644#section-3.4.3>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.search_with_body)
             resource_types = self.service.searched_types(target.endpoint)
@@ -210,7 +220,7 @@ class ScimHandler:
     # -- Bulk -----------------------------------------------------------
 
     def bulk(self, request: ScimRequest) -> ScimResponse:
-        """Run a bulk request (RFC 7644 §3.7)."""
+        """Run a bulk request (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`)."""
         with self.service.provider:
             self.service.route(request, Operation.bulk)
             plan = self.service.read_bulk(request.body, request.header("Content-Type"))
@@ -287,19 +297,19 @@ class ScimHandler:
     # -- Discovery ------------------------------------------------------
 
     def service_provider_config(self, request: ScimRequest) -> ScimResponse:
-        """Serve the ServiceProviderConfig endpoint (RFC 7644 §4)."""
+        """Serve the ServiceProviderConfig endpoint (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             self.service.route(request, Operation.service_provider_config)
             return self.service.service_provider_config(request.url, request.query)
 
     def resource_types(self, request: ScimRequest) -> ScimResponse:
-        """Serve the ResourceTypes endpoint (RFC 7644 §4)."""
+        """Serve the ResourceTypes endpoint (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             self.service.route(request, Operation.resource_types)
             return self.service.resource_types(request.url, request.query)
 
     def resource_type(self, request: ScimRequest) -> ScimResponse:
-        """Serve one resource type (RFC 7644 §4)."""
+        """Serve one resource type (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.resource_type)
             return self.service.resource_type(
@@ -307,13 +317,13 @@ class ScimHandler:
             )
 
     def schemas(self, request: ScimRequest) -> ScimResponse:
-        """Serve the Schemas endpoint (RFC 7644 §4)."""
+        """Serve the Schemas endpoint (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             self.service.route(request, Operation.schemas)
             return self.service.schemas(request.url, request.query)
 
     def schema(self, request: ScimRequest) -> ScimResponse:
-        """Serve one schema (RFC 7644 §4)."""
+        """Serve one schema (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.schema)
             return self.service.schema(
@@ -333,20 +343,25 @@ class AsyncScimHandler:
         self.storage = storage
 
     async def handle(self, request: ScimRequest) -> ScimResponse:
-        """Serve a request with the method of its operation (RFC 7644 §3.2).
+        """Serve a request with the method of its operation (:rfc:`RFC 7644 §3.2 <7644#section-3.2>`).
 
-        It answers 404 to an unknown path, 405 to a method the endpoint does
-        not support, and 501 to ``/Me``.
+        :raises ~scim2_models.NotFoundException: When the path matches no
+            route.
+        :raises ~scim2_server.errors.MethodNotAllowedException: When the
+            endpoint does not support the method.
+        :raises ~scim2_models.NotImplementedException: When the request is
+            on ``/Me`` and the service does not override
+            :meth:`~scim2_server.service.ScimService.me_target`.
         """
         with self.service.provider:
-            target = self.service.route(request)
+            target = self.service.match(request)
         response: ScimResponse = await getattr(self, target.operation.value)(request)
         return response
 
     # -- Resources ------------------------------------------------------
 
     async def create(self, request: ScimRequest) -> ScimResponse:
-        """Create a resource (RFC 7644 §3.3)."""
+        """Create a resource (:rfc:`RFC 7644 §3.3 <7644#section-3.3>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.create)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -358,7 +373,7 @@ class AsyncScimHandler:
             return self.service.creation_response(request.base_url, created)
 
     async def query(self, request: ScimRequest) -> ScimResponse:
-        """Read a resource (RFC 7644 §3.4.1)."""
+        """Read a resource (:rfc:`RFC 7644 §3.4.1 <7644#section-3.4.1>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.query)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -369,15 +384,16 @@ class AsyncScimHandler:
                 resource = await self.storage.get(
                     resource_type, cast(str, target.resource_id)
                 )
-            return self.service.query_response(
+            response = self.service.query_response(
                 request.base_url,
                 resource,
                 response_parameters,
                 self.service.read_conditions(request),
             )
+            return self.service.me_response(request, target, response)
 
     async def replace(self, request: ScimRequest) -> ScimResponse:
-        """Replace a resource (RFC 7644 §3.5.1)."""
+        """Replace a resource (:rfc:`RFC 7644 §3.5.1 <7644#section-3.5.1>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.replace)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -397,12 +413,13 @@ class AsyncScimHandler:
                     replacement,
                     self.service.read_conditions(request),
                 )
-            return self.service.replacement_response(
+            response = self.service.replacement_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     async def patch(self, request: ScimRequest) -> ScimResponse:
-        """Modify a resource (RFC 7644 §3.5.2)."""
+        """Modify a resource (:rfc:`RFC 7644 §3.5.2 <7644#section-3.5.2>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.patch)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -419,12 +436,13 @@ class AsyncScimHandler:
                     patch_op,
                     self.service.read_conditions(request),
                 )
-            return self.service.patch_response(
+            response = self.service.patch_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     async def delete(self, request: ScimRequest) -> ScimResponse:
-        """Delete a resource (RFC 7644 §3.6)."""
+        """Delete a resource (:rfc:`RFC 7644 §3.6 <7644#section-3.6>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.delete)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
@@ -434,7 +452,9 @@ class AsyncScimHandler:
                     cast(str, target.resource_id),
                     self.service.read_conditions(request),
                 )
-            return self.service.deletion_response()
+            return self.service.me_response(
+                request, target, self.service.deletion_response()
+            )
 
     async def replace_resource(
         self,
@@ -485,7 +505,7 @@ class AsyncScimHandler:
     # -- Search ---------------------------------------------------------
 
     async def search(self, request: ScimRequest) -> ScimResponse:
-        """Search with GET, on a resource type or at the root (RFC 7644 §3.4.2)."""
+        """Search with GET, on a resource type or at the root (:rfc:`RFC 7644 §3.4.2 <7644#section-3.4.2>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.search)
             resource_types = self.service.searched_types(target.endpoint)
@@ -501,7 +521,7 @@ class AsyncScimHandler:
             )
 
     async def search_with_body(self, request: ScimRequest) -> ScimResponse:
-        """Search with POST on ".search", on a resource type or at the root (RFC 7644 §3.4.3)."""
+        """Search with POST on ".search", on a resource type or at the root (:rfc:`RFC 7644 §3.4.3 <7644#section-3.4.3>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.search_with_body)
             resource_types = self.service.searched_types(target.endpoint)
@@ -519,7 +539,7 @@ class AsyncScimHandler:
     # -- Bulk -----------------------------------------------------------
 
     async def bulk(self, request: ScimRequest) -> ScimResponse:
-        """Run a bulk request (RFC 7644 §3.7)."""
+        """Run a bulk request (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`)."""
         with self.service.provider:
             self.service.route(request, Operation.bulk)
             plan = self.service.read_bulk(request.body, request.header("Content-Type"))
@@ -598,19 +618,19 @@ class AsyncScimHandler:
     # -- Discovery ------------------------------------------------------
 
     async def service_provider_config(self, request: ScimRequest) -> ScimResponse:
-        """Serve the ServiceProviderConfig endpoint (RFC 7644 §4)."""
+        """Serve the ServiceProviderConfig endpoint (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             self.service.route(request, Operation.service_provider_config)
             return self.service.service_provider_config(request.url, request.query)
 
     async def resource_types(self, request: ScimRequest) -> ScimResponse:
-        """Serve the ResourceTypes endpoint (RFC 7644 §4)."""
+        """Serve the ResourceTypes endpoint (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             self.service.route(request, Operation.resource_types)
             return self.service.resource_types(request.url, request.query)
 
     async def resource_type(self, request: ScimRequest) -> ScimResponse:
-        """Serve one resource type (RFC 7644 §4)."""
+        """Serve one resource type (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.resource_type)
             return self.service.resource_type(
@@ -618,13 +638,13 @@ class AsyncScimHandler:
             )
 
     async def schemas(self, request: ScimRequest) -> ScimResponse:
-        """Serve the Schemas endpoint (RFC 7644 §4)."""
+        """Serve the Schemas endpoint (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             self.service.route(request, Operation.schemas)
             return self.service.schemas(request.url, request.query)
 
     async def schema(self, request: ScimRequest) -> ScimResponse:
-        """Serve one schema (RFC 7644 §4)."""
+        """Serve one schema (:rfc:`RFC 7644 §4 <7644#section-4>`)."""
         with self.service.provider:
             target = self.service.route(request, Operation.schema)
             return self.service.schema(

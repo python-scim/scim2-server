@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import replace
 from http import HTTPStatus
 from typing import Any
 from typing import TypeVar
@@ -141,8 +142,24 @@ class ScimService:
 
     # -- Requests -------------------------------------------------------
 
-    def route(self, request: ScimRequest, operation: Operation | None = None) -> Target:
-        """Return the operation a request asks for, and what it acts on (RFC 7644 §3.2).
+    @staticmethod
+    def match(request: ScimRequest) -> Target:
+        """Return the operation a request asks for (:rfc:`RFC 7644 §3.2 <7644#section-3.2>`).
+
+        The target of a ``/Me`` request is not resolved yet.
+
+        :raises ~scim2_models.NotFoundException: When no endpoint has the path
+            of the request.
+        :raises ~scim2_server.errors.MethodNotAllowedException: When the
+            endpoint does not support the method of the request.
+        """
+        return match(request.method.upper(), request.path)
+
+    def route(self, request: ScimRequest, operation: Operation) -> Target:
+        """Return what a request for an operation acts on.
+
+        A ``/Me`` request acts on the resource of :meth:`me_target`, or creates
+        a resource of the type of :meth:`me_creation_type`.
 
         :param operation: The operation the caller serves. A request for
             another operation is a routing error of the integration.
@@ -150,15 +167,79 @@ class ScimService:
             of the request.
         :raises ~scim2_server.errors.MethodNotAllowedException: When the
             endpoint does not support the method of the request.
-        :raises ~scim2_models.NotImplementedException: For ``/Me``.
         """
-        target = match(request.method.upper(), request.path)
-        if operation is not None and target.operation is not operation:
+        target = self.match(request)
+        if target.operation is not operation:
             raise RuntimeError(
                 f"{request.method} {request.path} asks for {target.operation.value}, "
                 f"not for {operation.value}"
             )
-        return target
+        if not target.me:
+            return target
+        if operation is Operation.create:
+            resource_type = self.me_creation_type(request)
+            return replace(target, endpoint=self.endpoint_of(resource_type))
+        resource_type, resource_id = self.me_target(request)
+        return replace(
+            target, endpoint=self.endpoint_of(resource_type), resource_id=resource_id
+        )
+
+    @staticmethod
+    def endpoint_of(resource_type: ResourceType) -> str:
+        """Return the endpoint of a resource type, without its slashes."""
+        assert resource_type.endpoint is not None
+        return resource_type.endpoint.strip("/")
+
+    def me_target(self, request: ScimRequest) -> tuple[ResourceType, str]:
+        """Return the type and the identifier of the resource ``/Me`` stands for (:rfc:`RFC 7644 §3.11 <7644#section-3.11>`).
+
+        Override this method to serve ``/Me``. It reads the authenticated
+        subject in :attr:`ScimRequest.subject
+        <scim2_server.requests.ScimRequest.subject>`. The exceptions it raises
+        answer the request.
+
+        :raises ~scim2_models.NotImplementedException: By default, so that
+            ``/Me`` answers 501.
+        :raises ~scim2_models.UnauthorizedException: When the request has no
+            authenticated subject, for an application that accepts anonymous
+            requests. It answers 401.
+        :raises ~scim2_models.ForbiddenException: When the subject may not
+            use ``/Me``, for a 403.
+        :raises ~scim2_models.NotFoundException: When the subject has no
+            resource, for a 404.
+        """
+        raise NotImplementedException(detail="/Me is not supported")
+
+    def me_creation_type(self, request: ScimRequest) -> ResourceType:
+        """Return the type of the resource a POST on ``/Me`` creates (:rfc:`RFC 7644 §3.11 <7644#section-3.11>`).
+
+        Override this method to let the clients register themselves
+        (:rfc:`RFC 7644 §7.6 <7644#section-7.6>`). Linking the created resource to the subject is left to the
+        application. The exceptions it raises answer the request.
+
+        :raises ~scim2_models.NotImplementedException: By default, so that a
+            POST on ``/Me`` answers 501.
+        :raises ~scim2_models.UnauthorizedException: When the request has no
+            authenticated subject, for an application that accepts anonymous
+            requests. It answers 401.
+        :raises ~scim2_models.ForbiddenException: When the subject may not
+            register, for a 403.
+        :raises ~scim2_models.UniquenessException: When the subject already
+            has a resource, for a 409.
+        """
+        raise NotImplementedException(detail="POST /Me is not supported")
+
+    def me_response(
+        self, request: ScimRequest, target: Target, response: ScimResponse
+    ) -> ScimResponse:
+        """Add the location of the resource ``/Me`` stands for to a response (:rfc:`RFC 7644 §3.11 <7644#section-3.11>`)."""
+        if target.me and target.resource_id is not None:
+            response.headers["Location"] = self.resource_location(
+                request.base_url,
+                self.resource_type_at(cast(str, target.endpoint)),
+                target.resource_id,
+            )
+        return response
 
     @staticmethod
     def read_conditions(request: ScimRequest) -> Conditions:
@@ -172,10 +253,10 @@ class ScimService:
         """Return the largest body the service accepts for a request, in bytes.
 
         An integration reads at most one byte more, and leaves the 413 answer to
-        the service. A bulk request is limited by maxPayloadSize (RFC 7644
-        §3.7.4). Other requests have no limit.
+        the service. A bulk request is limited by maxPayloadSize
+        (:rfc:`RFC 7644 §3.7.4 <7644#section-3.7.4>`). Other requests have no limit.
         """
-        if self.route(request).operation is Operation.bulk:
+        if self.match(request).operation is Operation.bulk:
             return self.bulk_max_payload_size()
         return None
 
@@ -189,6 +270,17 @@ class ScimService:
         if resource_type is None:
             raise NotFoundException(detail=f"No resource type found at {endpoint!r}")
         return resource_type
+
+    def get_resource_type(self, name: str) -> ResourceType:
+        """Return the resource type of a name, such as ``User``.
+
+        :raises ValueError: When the provider serves no resource type of this
+            name.
+        """
+        for resource_type in self.provider.resource_types:
+            if resource_type.name == name:
+                return resource_type
+        raise ValueError(f"No resource type named {name!r}")
 
     def get_resource_type_of(self, resource: Resource[Any]) -> ResourceType:
         """Return the resource type of a stored resource, from its meta.resourceType.
@@ -231,7 +323,7 @@ class ScimService:
         return self.config.bulk.max_payload_size if self.config.bulk else None
 
     def ensure_bulk_payload_size(self, size: int) -> None:
-        """Refuse with a 413 a bulk request body larger than maxPayloadSize (RFC 7644 §3.7.4).
+        """Refuse with a 413 a bulk request body larger than maxPayloadSize (:rfc:`RFC 7644 §3.7.4 <7644#section-3.7.4>`).
 
         :param size: The size of the body, in bytes.
         """
@@ -408,7 +500,7 @@ class ScimService:
     def read_search_query(
         self, resource_types: list[ResourceType], query: Mapping[str, str]
     ) -> SearchRequest[Any]:
-        """Read the query parameters of a search with GET (RFC 7644 §3.4.2)."""
+        """Read the query parameters of a search with GET (:rfc:`RFC 7644 §3.4.2 <7644#section-3.4.2>`)."""
         return self.read_search(
             resource_types,
             {key: query[key] for key in SEARCH_REQUEST_PARAMETERS if key in query},
@@ -420,7 +512,7 @@ class ScimService:
         body: bytes,
         content_type: str | None,
     ) -> SearchRequest[Any]:
-        """Read the body of a search with POST on ".search" (RFC 7644 §3.4.3)."""
+        """Read the body of a search with POST on ".search" (:rfc:`RFC 7644 §3.4.3 <7644#section-3.4.3>`)."""
         return self.read_search(resource_types, self.decode_body(body, content_type))
 
     def read_search(
@@ -592,7 +684,7 @@ class ScimService:
     # -- Bulk -----------------------------------------------------------
 
     def read_bulk(self, body: bytes, content_type: str | None) -> BulkPlan:
-        """Validate a bulk request against the limits of the service, and plan its operations (RFC 7644 §3.7)."""
+        """Validate a bulk request against the limits of the service, and plan its operations (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`)."""
         self.ensure_supported(self.config.bulk, "Bulk")
         bulk = cast(Bulk, self.config.bulk)
         self.ensure_bulk_payload_size(len(body))
@@ -792,7 +884,7 @@ class ScimService:
     def error_response(self, exception: Exception) -> ScimResponse:
         """Return the SCIM error response of an exception raised while serving a request.
 
-        A 401 response carries the ``WWW-Authenticate`` header of
+        A 401 response carries the :mdn:`WWW-Authenticate` header of
         :meth:`www_authenticate`.
         """
         error = self.error_of(exception)
@@ -807,12 +899,12 @@ class ScimService:
         return response
 
     def www_authenticate(self, exception: SCIMException) -> str | None:
-        """Return the ``WWW-Authenticate`` header of a 401 response (RFC 7644 §2).
+        """Return the :mdn:`WWW-Authenticate` header of a 401 response (:rfc:`RFC 7644 §2 <7644#section-2>`).
 
         It holds one challenge per authentication scheme of the service
         provider configuration, for the Bearer and Basic schemes. Override this
         method to announce other schemes, or to add parameters to the
-        challenges, such as ``resource_metadata`` (RFC 9728 §5.1).
+        challenges, such as ``resource_metadata`` (:rfc:`RFC 9728 §5.1 <9728#section-5.1>`).
         """
         schemes = self.config.authentication_schemes or []
         challenges = dict.fromkeys(

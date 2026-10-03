@@ -45,9 +45,6 @@ class ResourceEndpointConverter(BaseConverter):
     part_isolating = True
 
 
-ME_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
-
-
 def werkzeug_pattern(pattern: str) -> str:
     """Return the werkzeug rule of a route pattern."""
     return (
@@ -92,10 +89,6 @@ class SCIMApplication:
             )
             for prefix in ("", "/v2")
             for route in ROUTES
-        ] + [
-            # RFC 7644 §3.11: /Me answers 501, that the handler raises.
-            Rule(f"{prefix}/Me", endpoint="me", methods=list(ME_METHODS))
-            for prefix in ("", "/v2")
         ]
         self.url_map = Map(
             rules, converters={"resource_endpoint": ResourceEndpointConverter}
@@ -131,9 +124,19 @@ class SCIMApplication:
             path=path,
             query=request.args,
             headers=request.headers,
+            subject=self.get_subject(request),
         )
         scim_request.body = self.read_body(request, scim_request)
         return scim_request
+
+    def get_subject(self, request: Request) -> Any:
+        """Return the authenticated subject of a request.
+
+        It returns :data:`None` by default. Override it to pass the subject
+        that :meth:`check_auth` authenticated to the service, for instance to
+        serve ``/Me``.
+        """
+        return None
 
     def read_body(self, request: Request, scim_request: ScimRequest) -> bytes:
         """Read the body of a request, without reading more than the service accepts.
