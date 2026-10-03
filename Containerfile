@@ -6,9 +6,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md LICENSE ./
-RUN uv sync --locked --no-dev --extra werkzeug --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 COPY scim2_server ./scim2_server
-RUN uv sync --locked --no-dev --extra werkzeug --no-editable
+RUN uv sync --locked --no-dev --no-editable
 
 FROM python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
 
@@ -17,7 +17,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 USER nobody
 EXPOSE 8080
-# Werkzeug stops gracefully on KeyboardInterrupt, which lets --dump-resources be written.
+# The server stops gracefully on KeyboardInterrupt, which lets --dump-resources be written.
 STOPSIGNAL SIGINT
 ENTRYPOINT ["scim2-server", "--hostname", "0.0.0.0"]
 CMD ["--port", "8080"]

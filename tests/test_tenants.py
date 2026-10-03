@@ -2,15 +2,15 @@ import httpx2
 import pytest
 
 from scim2_server.memory import InMemoryStorage
-from scim2_server.werkzeug import SCIMApplication
-from scim2_server.werkzeug import TenantDispatcher
+from scim2_server.wsgi import TenantDispatcher
+from scim2_server.wsgi import WSGIApplication
 
 BASE_URL = "https://scim.example.com"
 
 
 @pytest.fixture
 def factory(scim_provider):
-    return lambda tenant: SCIMApplication(InMemoryStorage(), scim_provider)
+    return lambda tenant: WSGIApplication(InMemoryStorage(), scim_provider)
 
 
 def make_client(dispatcher, script_name=""):

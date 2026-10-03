@@ -2,9 +2,9 @@ import httpx2
 import pytest
 
 from scim2_server.memory import InMemoryStorage
+from scim2_server.testserver import BEARER_TOKEN_SCHEME
+from scim2_server.testserver import BearerTokenApplication
 from scim2_server.utils import load_default_provider
-from scim2_server.werkzeug.testserver import BEARER_TOKEN_SCHEME
-from scim2_server.werkzeug.testserver import BearerTokenApplication
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ from werkzeug.test import EnvironBuilder
 from werkzeug.test import run_wsgi_app
 
 from scim2_server.utils import load_default_service_provider_config
-from scim2_server.werkzeug import SCIMApplication
+from scim2_server.wsgi import WSGIApplication
 
 BULK_REQUEST = "urn:ietf:params:scim:api:messages:2.0:BulkRequest"
 PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
@@ -412,8 +412,8 @@ class TestBulkRequest:
         ).get_environ()
         del environ["CONTENT_LENGTH"]
         environ["wsgi.input_terminated"] = True
-        response, status, _ = run_wsgi_app(SCIMApplication(storage, provider), environ)
-        assert status == "413 REQUEST ENTITY TOO LARGE"
+        response, status, _ = run_wsgi_app(WSGIApplication(storage, provider), environ)
+        assert status.startswith("413 ")
         assert (
             json.loads(b"".join(response))["detail"]
             == "The payload exceeds the maxPayloadSize (100 bytes)"

@@ -7,7 +7,7 @@ from scim2_server.memory import InMemoryStorage
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
-from scim2_server.werkzeug import SCIMApplication
+from scim2_server.wsgi import WSGIApplication
 
 USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
 
@@ -23,7 +23,7 @@ def wsgi():
         [*load_default_resource_types().values(), admin],
         config=load_default_service_provider_config(),
     )
-    transport = httpx2.WSGITransport(app=SCIMApplication(InMemoryStorage(), provider))
+    transport = httpx2.WSGITransport(app=WSGIApplication(InMemoryStorage(), provider))
     with httpx2.Client(
         transport=transport, base_url="https://scim.example.com"
     ) as client:

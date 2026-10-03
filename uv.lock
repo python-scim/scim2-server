@@ -896,9 +896,6 @@ dependencies = [
 testing = [
     { name = "pytest" },
 ]
-werkzeug = [
-    { name = "werkzeug" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -918,9 +915,8 @@ dev = [
 requires-dist = [
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "scim2-models", specifier = ">=0.10.3" },
-    { name = "werkzeug", marker = "extra == 'werkzeug'", specifier = ">=3.0.3" },
 ]
-provides-extras = ["testing", "werkzeug"]
+provides-extras = ["testing"]
 
 [package.metadata.requires-dev]
 dev = [

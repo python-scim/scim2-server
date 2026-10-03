@@ -5,10 +5,9 @@ import httpx2
 import pytest
 from scim2_models import Context
 from scim2_models import NotFoundException
-from werkzeug.exceptions import HTTPException
 
 from scim2_server.service import ScimService
-from scim2_server.werkzeug import SCIMApplication
+from scim2_server.wsgi import WSGIApplication
 
 
 class TestProvider:
@@ -32,33 +31,18 @@ class TestProvider:
         ret = app.storage.create(user_type, user_model)
         assert ret.id is not None
 
-    def test_generic_exception_handling(self, app):
+    def test_generic_exception_handling(self, app, wsgi):
         """An unexpected error answers 500 without disclosing its message or traceback."""
-        from werkzeug import Request
-
-        # Create a mock WSGI environ
-        environ = {
-            "REQUEST_METHOD": "GET",
-            "PATH_INFO": "/v2/ServiceProviderConfig",
-            "SERVER_NAME": "localhost",
-            "SERVER_PORT": "8000",
-            "wsgi.url_scheme": "http",
-        }
-
-        request = Request(environ)
-
-        # Mock to force a generic exception during request processing
         with patch.object(
             app.service,
             "service_provider_config",
             side_effect=RuntimeError("Test error"),
         ):
-            response = app.wsgi_app(request, environ)
+            r = wsgi.get("/v2/ServiceProviderConfig")
 
-            # Should return a Response object with status 500
-            assert response.status_code == 500
-            assert response.json["detail"] == "Internal server error"
-            assert "Traceback" not in response.get_data(as_text=True)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Internal server error"
+        assert "Traceback" not in r.text
 
     def test_replace_resource_lost_by_the_storage(self, app, wsgi, first_fake_user):
         """A PUT answers 404 when the storage no longer has the resource to update."""
@@ -88,17 +72,6 @@ class TestProvider:
 
         assert r.status_code == 404
 
-    def test_http_exception_without_status_code(self, app, wsgi):
-        """An HTTP exception without status code answers 500."""
-        with patch.object(
-            app.service,
-            "service_provider_config",
-            side_effect=HTTPException("Something went wrong"),
-        ):
-            r = wsgi.get("/v2/ServiceProviderConfig")
-
-        assert r.status_code == 500
-
     @pytest.mark.parametrize(
         ("method", "path"),
         [
@@ -121,7 +94,7 @@ class TestProvider:
     @pytest.mark.parametrize(
         ("method", "path", "allowed"),
         [
-            ("POST", "/v2/Schemas", "GET, HEAD"),
+            ("POST", "/v2/Schemas", "GET"),
             ("GET", "/v2/Bulk", "POST"),
         ],
     )
@@ -158,7 +131,7 @@ def test_a_given_service_serves_the_requests(storage, scim_provider):
         def resource_location(self, base_url, resource_type, resource_id):
             return f"https://ids.example/{resource_type.id}/{resource_id}"
 
-    app = SCIMApplication(
+    app = WSGIApplication(
         storage, scim_provider, service=ElsewhereService(scim_provider)
     )
     with httpx2.Client(
@@ -172,7 +145,7 @@ def test_a_given_service_serves_the_requests(storage, scim_provider):
 
 def test_a_client_error_is_logged_without_traceback(wsgi, caplog):
     """An error of the client is logged at the INFO level, without traceback."""
-    with caplog.at_level(logging.INFO, logger="SCIMApplication"):
+    with caplog.at_level(logging.INFO, logger="scim2_server"):
         wsgi.get("/v2/Users/unknown")
 
     (record,) = caplog.records
@@ -183,7 +156,7 @@ def test_a_client_error_is_logged_without_traceback(wsgi, caplog):
 
 def test_an_http_error_is_logged_without_traceback(wsgi, caplog):
     """A werkzeug HTTP error, such as an unknown URL, is logged at the INFO level, without traceback."""
-    with caplog.at_level(logging.INFO, logger="SCIMApplication"):
+    with caplog.at_level(logging.INFO, logger="scim2_server"):
         wsgi.get("/unknown/path/to/nothing")
 
     (record,) = caplog.records
