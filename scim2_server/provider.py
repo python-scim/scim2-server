@@ -16,7 +16,6 @@ from werkzeug import Response
 from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import MethodNotAllowed
 from werkzeug.exceptions import RequestEntityTooLarge
-from werkzeug.exceptions import Unauthorized
 from werkzeug.routing import BaseConverter
 from werkzeug.routing import Map
 from werkzeug.routing import Rule
@@ -67,7 +66,6 @@ class SCIMApplication:
         provider: ScimProvider,
         service: ScimService | None = None,
     ):
-        self.bearer_tokens: set[str] = set()
         self.storage = storage
         self.provider = provider
         self.service = service if service is not None else ScimService(provider)
@@ -288,22 +286,13 @@ class SCIMApplication:
 
     # -- Authentication -------------------------------------------------
 
-    def register_bearer_token(self, token: str) -> None:
-        """Register a static bearer token for authentication.
-
-        :param token: Bearer token
-        """
-        self.bearer_tokens.add(token)
-
     def check_auth(self, request: Request) -> None:
-        """Check the authorization headers."""
-        if not self.bearer_tokens:
-            return
-        if (
-            not request.authorization
-            or request.authorization.token not in self.bearer_tokens
-        ):
-            raise Unauthorized
+        """Authenticate the client of a request.
+
+        It accepts every request. Override it, and raise
+        :class:`~werkzeug.exceptions.Unauthorized` or
+        :class:`~werkzeug.exceptions.Forbidden` to refuse a request.
+        """
 
     # -- Responses ------------------------------------------------------
 
@@ -389,9 +378,6 @@ class SCIMApplication:
             # but the examples in RFC 7644 include the "Location" header even for responses that
             # did not create a new resource
             response.headers.add("Location", request.url)
-        if self.bearer_tokens and not request.authorization:
-            # RFC 7644, Section 2
-            response.headers.add("WWW-Authenticate", 'Bearer realm="SCIM Provider"')
         return response
 
     def __call__(

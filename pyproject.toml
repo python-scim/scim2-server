@@ -43,7 +43,7 @@ repository = "https://github.com/python-scim/scim2-server"
 funding = "https://github.com/sponsors/python-scim"
 
 [project.scripts]
-scim2-server = "scim2_server.cli:main"
+scim2-server = "scim2_server.testserver.cli:main"
 
 [dependency-groups]
 dev = [
@@ -81,7 +81,7 @@ source = [
     "scim2_server",
     "tests",
 ]
-omit = [".tox/*", "examples/*", "scim2_server/cli.py"]
+omit = [".tox/*", "examples/*", "scim2_server/testserver/cli.py"]
 branch = true
 
 [tool.coverage.report]
