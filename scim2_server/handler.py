@@ -40,7 +40,7 @@ class ScimHandler:
         not support, and 501 to ``/Me``.
         """
         with self.service.provider:
-            target = self.service.route(request)
+            target = self.service.match(request)
         response: ScimResponse = getattr(self, target.operation.value)(request)
         return response
 
@@ -70,12 +70,13 @@ class ScimHandler:
                 resource = self.storage.get(
                     resource_type, cast(str, target.resource_id)
                 )
-            return self.service.query_response(
+            response = self.service.query_response(
                 request.base_url,
                 resource,
                 response_parameters,
                 self.service.read_conditions(request),
             )
+            return self.service.me_response(request, target, response)
 
     def replace(self, request: ScimRequest) -> ScimResponse:
         """Replace a resource (RFC 7644 §3.5.1)."""
@@ -96,9 +97,10 @@ class ScimHandler:
                     replacement,
                     self.service.read_conditions(request),
                 )
-            return self.service.replacement_response(
+            response = self.service.replacement_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     def patch(self, request: ScimRequest) -> ScimResponse:
         """Modify a resource (RFC 7644 §3.5.2)."""
@@ -118,9 +120,10 @@ class ScimHandler:
                     patch_op,
                     self.service.read_conditions(request),
                 )
-            return self.service.patch_response(
+            response = self.service.patch_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     def delete(self, request: ScimRequest) -> ScimResponse:
         """Delete a resource (RFC 7644 §3.6)."""
@@ -133,7 +136,9 @@ class ScimHandler:
                     cast(str, target.resource_id),
                     self.service.read_conditions(request),
                 )
-            return self.service.deletion_response()
+            return self.service.me_response(
+                request, target, self.service.deletion_response()
+            )
 
     def replace_resource(
         self,
@@ -339,7 +344,7 @@ class AsyncScimHandler:
         not support, and 501 to ``/Me``.
         """
         with self.service.provider:
-            target = self.service.route(request)
+            target = self.service.match(request)
         response: ScimResponse = await getattr(self, target.operation.value)(request)
         return response
 
@@ -369,12 +374,13 @@ class AsyncScimHandler:
                 resource = await self.storage.get(
                     resource_type, cast(str, target.resource_id)
                 )
-            return self.service.query_response(
+            response = self.service.query_response(
                 request.base_url,
                 resource,
                 response_parameters,
                 self.service.read_conditions(request),
             )
+            return self.service.me_response(request, target, response)
 
     async def replace(self, request: ScimRequest) -> ScimResponse:
         """Replace a resource (RFC 7644 §3.5.1)."""
@@ -397,9 +403,10 @@ class AsyncScimHandler:
                     replacement,
                     self.service.read_conditions(request),
                 )
-            return self.service.replacement_response(
+            response = self.service.replacement_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     async def patch(self, request: ScimRequest) -> ScimResponse:
         """Modify a resource (RFC 7644 §3.5.2)."""
@@ -419,9 +426,10 @@ class AsyncScimHandler:
                     patch_op,
                     self.service.read_conditions(request),
                 )
-            return self.service.patch_response(
+            response = self.service.patch_response(
                 request.base_url, resource, response_parameters
             )
+            return self.service.me_response(request, target, response)
 
     async def delete(self, request: ScimRequest) -> ScimResponse:
         """Delete a resource (RFC 7644 §3.6)."""
@@ -434,7 +442,9 @@ class AsyncScimHandler:
                     cast(str, target.resource_id),
                     self.service.read_conditions(request),
                 )
-            return self.service.deletion_response()
+            return self.service.me_response(
+                request, target, self.service.deletion_response()
+            )
 
     async def replace_resource(
         self,

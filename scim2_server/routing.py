@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 from scim2_models import NotFoundException
-from scim2_models import NotImplementedException
 
 from scim2_server.errors import MethodNotAllowedException
 
@@ -51,6 +50,11 @@ ROUTES = (
     Route("GET", "/Schemas", Operation.schemas, "schemas"),
     Route("GET", "/Schemas/{resource_id}", Operation.schema, "schema"),
     Route("POST", "/Bulk", Operation.bulk, "bulk"),
+    Route("GET", "/Me", Operation.query, "me_query"),
+    Route("PUT", "/Me", Operation.replace, "me_replace"),
+    Route("PATCH", "/Me", Operation.patch, "me_patch"),
+    Route("DELETE", "/Me", Operation.delete, "me_delete"),
+    Route("POST", "/Me", Operation.create, "me_create"),
     Route("GET", "/", Operation.search, "search_root"),
     Route("POST", "/.search", Operation.search_with_body, "search_root_with_body"),
     Route("POST", "/{endpoint}/.search", Operation.search_with_body, "search_with_body"),
@@ -63,7 +67,8 @@ ROUTES = (
 )  # fmt: skip
 """The routes of a SCIM server, the literal ones first.
 
-``/Me`` is not routed: it answers 501.
+The routes of ``/Me`` serve the resource of the authenticated subject
+(RFC 7644 §3.11).
 """
 
 
@@ -78,6 +83,10 @@ class Target:
     resource_id: str | None = None
     """The identifier of a resource, a resource type or a schema."""
 
+    me: bool = False
+    """Whether the request targets ``/Me``, the alias of the resource of the
+    authenticated subject."""
+
 
 def match(method: str, path: str) -> Target:
     """Return the target of a request.
@@ -85,12 +94,8 @@ def match(method: str, path: str) -> Target:
     :raises ~scim2_models.NotFoundException: When no route has this path.
     :raises ~scim2_server.errors.MethodNotAllowedException: When the routes of
         this path do not support the method.
-    :raises ~scim2_models.NotImplementedException: For ``/Me``, that the server
-        does not serve (RFC 7644 §3.11).
     """
     segments = path.strip("/").split("/") if path.strip("/") else []
-    if segments == ["Me"]:
-        raise NotImplementedException(detail="/Me is not supported")
 
     allowed = []
     for route in ROUTES:
@@ -98,7 +103,7 @@ def match(method: str, path: str) -> Target:
         if values is None:
             continue
         if route.method == method:
-            return Target(route.operation, **values)
+            return Target(route.operation, **values, me=route.pattern == "/Me")
         allowed.append(route.method)
     if allowed:
         raise MethodNotAllowedException(allowed=allowed)
