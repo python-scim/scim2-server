@@ -21,7 +21,7 @@ def opaque_tag(entity_tag: str) -> str:
 
 @dataclass(frozen=True)
 class EntityTags:
-    """The entity tags of an "If-Match" or an "If-None-Match" header."""
+    """The entity tags of an :mdn:`If-Match` or an :mdn:`If-None-Match` header."""
 
     tags: frozenset[str] = frozenset()
     """The opaque part of each listed tag."""
@@ -50,9 +50,8 @@ class EntityTags:
     def matches(self, version: str | None) -> bool:
         """Tell whether a resource version matches the header, with the weak comparison.
 
-        RFC 9110 §13.1.1 compares "If-Match" strongly. That would never match
-        the weak ETags RFC 7644 §3.14 recommends and sends in its example, so
-        both headers are compared weakly.
+        Both :mdn:`If-Match` and :mdn:`If-None-Match` use the weak comparison
+        (:rfc:`RFC 9110 §8.8.3.2 <9110#section-8.8.3.2>`).
 
         :param version: The version of the resource, or :data:`None` when the
             service does not version its resources.
@@ -72,13 +71,13 @@ class Conditions:
     def check(self, version: str | None, method: str) -> bool:
         """Evaluate the conditions against the version of a resource.
 
-        RFC 9110 §13.2.2 evaluates "If-Match" first: a failed "If-Match"
-        answers 412 whatever the method, and a failed "If-None-Match" answers
-        304 to a GET and 412 otherwise.
+        Per :rfc:`RFC 9110 §13.2.2 <9110#section-13.2.2>`, :mdn:`If-Match` is evaluated first. A failed
+        ``If-Match`` answers 412 whatever the method. A failed :mdn:`If-None-Match`
+        answers 304 to a GET and 412 otherwise.
 
         :param version: The version of the resource, or :data:`None` when the
             service does not version its resources. Such a resource matches no
-            listed tag, and "*" still matches it (RFC 9110 §13.1.1).
+            listed tag, and "*" still matches it (:rfc:`RFC 9110 §13.1.1 <9110#section-13.1.1>`).
         :return: :data:`False` when a GET should answer 304 Not Modified.
         :raises ~scim2_models.PreconditionFailedException: When the method must not be performed.
         """
@@ -93,7 +92,3 @@ class Conditions:
             raise PreconditionFailedException
 
         return True
-
-
-NO_CONDITIONS = Conditions()
-"""The conditions of a request without conditional header."""

@@ -9,11 +9,11 @@ from scim2_models import SCIMException
 from scim2_models import SearchRequest
 from scim2_models import UnauthorizedException
 
-from scim2_server.conditions import NO_CONDITIONS
 from scim2_server.handler import AsyncScimHandler
 from scim2_server.handler import ScimHandler
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
+from scim2_server.requests import ScimRequest
 from scim2_server.service import ScimService
 from scim2_server.service import is_json_media_type
 from scim2_server.utils import load_default_provider
@@ -66,45 +66,49 @@ def test_a_validation_error_is_unexpected(scim_provider):
 
 
 INVALID_REQUESTS = {
-    "creation": lambda handler: handler.create(
+    "creation": ScimRequest(
+        "POST",
         "https://scim.example/v2",
-        "Users",
-        b'{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"]}',
-        "application/scim+json",
+        "/Users",
+        headers={"Content-Type": "application/scim+json"},
+        body=b'{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"]}',
     ),
-    "query": lambda handler: handler.query(
+    "query": ScimRequest(
+        "GET",
         "https://scim.example/v2",
-        "Users",
-        "unknown",
-        {"attributes": "userName", "excludedAttributes": "displayName"},
-        NO_CONDITIONS,
+        "/Users/unknown",
+        query={"attributes": "userName", "excludedAttributes": "displayName"},
     ),
-    "search": lambda handler: handler.search(
-        "https://scim.example/v2", "Users", {"count": "many"}
+    "search": ScimRequest(
+        "GET", "https://scim.example/v2", "/Users", query={"count": "many"}
     ),
 }
 
 
-@pytest.mark.parametrize("request_of", INVALID_REQUESTS.values(), ids=INVALID_REQUESTS)
-def test_an_invalid_request_raises_a_scim_exception(scim_provider, request_of):
+@pytest.mark.parametrize(
+    "scim_request", INVALID_REQUESTS.values(), ids=INVALID_REQUESTS
+)
+def test_an_invalid_request_raises_a_scim_exception(scim_provider, scim_request):
     """The handler turns the validation errors of a request into SCIM exceptions answering 400."""
     handler = ScimHandler(ScimService(scim_provider), InMemoryStorage())
 
     with pytest.raises(SCIMException) as excinfo:
-        request_of(handler)
+        handler.handle(scim_request)
 
     assert excinfo.value.status == 400
 
 
-@pytest.mark.parametrize("request_of", INVALID_REQUESTS.values(), ids=INVALID_REQUESTS)
+@pytest.mark.parametrize(
+    "scim_request", INVALID_REQUESTS.values(), ids=INVALID_REQUESTS
+)
 def test_an_invalid_request_raises_a_scim_exception_asynchronously(
-    scim_provider, request_of
+    scim_provider, scim_request
 ):
     """The asynchronous handler turns the validation errors of a request into SCIM exceptions."""
     handler = AsyncScimHandler(ScimService(scim_provider), AsyncInMemoryStorage())
 
     with pytest.raises(SCIMException) as excinfo:
-        asyncio.run(request_of(handler))
+        asyncio.run(handler.handle(scim_request))
 
     assert excinfo.value.status == 400
 
