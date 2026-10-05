@@ -7,6 +7,8 @@ Changelog
 Changed
 ^^^^^^^
 - :meth:`~scim2_server.service.ScimService.bulk_outcome` takes the base URL.
+- :meth:`~scim2_server.service.ScimService.max_body_size` returns 0 instead of raising an
+  exception, for a request that fails whatever its body, such as on an unknown path.
 
 Fixed
 ^^^^^

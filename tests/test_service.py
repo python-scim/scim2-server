@@ -3,6 +3,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 from scim2_models import AuthenticationScheme
+from scim2_models import Bulk
 from scim2_models import ForbiddenException
 from scim2_models import NotFoundException
 from scim2_models import SCIMException
@@ -164,3 +165,30 @@ def test_the_challenge_can_be_overridden(scim_provider):
     result = MetadataService(scim_provider).error_response(UnauthorizedException())
 
     assert result.headers["WWW-Authenticate"].startswith("Bearer resource_metadata=")
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "size"),
+    [
+        ("POST", "/Users", None),
+        ("POST", "/Bulk", 1048576),
+        ("POST", "/Unknown/x/y", 0),
+        ("POST", "/Users/x", 0),
+    ],
+    ids=["resource", "bulk", "unknown-path", "method-not-allowed"],
+)
+def test_max_body_size(scim_provider, method, path, size):
+    """Only a bulk request has a limit. A request that fails whatever its body gets no body."""
+    request = ScimRequest(method, "https://scim.example/v2", path)
+    assert ScimService(scim_provider).max_body_size(request) == size
+
+
+@pytest.mark.parametrize(
+    "bulk", [None, Bulk(supported=False, max_payload_size=1048576)]
+)
+def test_max_body_size_without_bulk(bulk):
+    """A bulk request gets no body when the service does not support bulk."""
+    provider = load_default_provider()
+    provider.config.bulk = bulk
+    request = ScimRequest("POST", "https://scim.example/v2", "/Bulk")
+    assert ScimService(provider).max_body_size(request) == 0

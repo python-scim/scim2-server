@@ -10,7 +10,6 @@ from urllib.parse import parse_qsl
 from wsgiref.util import application_uri
 
 from scim2_models import NotFoundException
-from scim2_models import SCIMException
 from scim2_models import ScimProvider
 
 from scim2_server.applications.base import VERSION_PREFIX
@@ -94,10 +93,7 @@ class WSGIApplication(BaseApplication):
         A body without :mdn:`Content-Length` is read up to its end, when the
         server marks its input as terminated.
         """
-        try:
-            limit = self.service.max_body_size(request)
-        except SCIMException:
-            limit = None
+        limit = self.service.max_body_size(request)
         if environ.get("CONTENT_LENGTH"):
             size = int(environ["CONTENT_LENGTH"])
         elif environ.get("wsgi.input_terminated"):

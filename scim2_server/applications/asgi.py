@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qsl
 
-from scim2_models import SCIMException
 from scim2_models import ScimProvider
 
 from scim2_server.applications.base import VERSION_PREFIX
@@ -79,10 +78,7 @@ class ASGIApplication(BaseApplication):
                 (name.decode(), value.decode()) for name, value in scope["headers"]
             ],
         )
-        try:
-            limit = self.service.max_body_size(request)
-        except SCIMException:
-            limit = None
+        limit = self.service.max_body_size(request)
         body = b""
         more_body = True
         while more_body:

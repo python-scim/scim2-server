@@ -344,13 +344,25 @@ class ScimService:
     def max_body_size(self, request: ScimRequest) -> int | None:
         """Return the largest body the service accepts for a request, in bytes.
 
-        An integration reads at most one byte more, and leaves the 413 answer to
-        the service. A bulk request is limited by maxPayloadSize
-        (:rfc:`RFC 7644 §3.7.4 <7644#section-3.7.4>`). Other requests have no limit.
+        An integration reads at most one byte more, and passes the body to the
+        handler. It must not refuse a larger body itself: the service answers,
+        with a 413 or with an error that comes first, such as a 501 when bulk
+        is not supported.
+
+        A bulk request is limited by maxPayloadSize
+        (:rfc:`RFC 7644 §3.7.4 <7644#section-3.7.4>`). A request that fails
+        whatever its body, such as a request on an unknown path, gets 0.
+        Other requests have no limit.
         """
-        if self.match(request).operation is Operation.bulk:
-            return self.bulk_max_payload_size()
-        return None
+        try:
+            operation = self.match(request).operation
+        except SCIMException:
+            return 0
+        if operation is not Operation.bulk:
+            return None
+        if self.config.bulk is None or not self.config.bulk.supported:
+            return 0
+        return self.bulk_max_payload_size()
 
     def resource_type_at(self, endpoint: str) -> ResourceType:
         """Return the resource type an endpoint serves.

@@ -346,6 +346,12 @@ class TestBulkRequest:
         assert r.status_code == 501
         assert r.json()["detail"] == "Bulk is not supported"
 
+    def test_not_supported_with_a_null_payload_size(self, wsgi_with):
+        """A service without bulk answers 501, not 413, whatever its maxPayloadSize."""
+        client = configured(wsgi_with, bulk=Bulk(supported=False, max_payload_size=0))
+        r = bulk(client, [create_user("alice")])
+        assert r.status_code == 501
+
     def test_empty(self, wsgi):
         """A job without operations answers an empty list of results."""
         r = bulk(wsgi, [])

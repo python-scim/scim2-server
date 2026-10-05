@@ -109,11 +109,18 @@ The following sketch builds the request with Flask and FastAPI, for SCIM endpoin
                   await request.body(),
               )
 
-The handler raises a :class:`~scim2_models.PayloadTooLargeException` for a bulk request larger
-than the ``maxPayloadSize`` of the service. It does not protect the memory of the server, since
-the body is already read. Limit the size of the bodies with the framework, such as the
-:data:`~flask:MAX_CONTENT_LENGTH` setting of Flask.
-:meth:`~scim2_server.service.ScimService.max_body_size` gives the limit of a request.
+The sketch reads the whole body. To stop reading a large body early, read at most one byte more
+than :meth:`~scim2_server.service.ScimService.max_body_size`, and pass this body to the handler.
+The service answers: a 413 for a bulk request larger than ``maxPayloadSize``, or an error that
+comes first, such as a 501 when the service does not support bulk.
+
+Do not refuse a large body with the framework, such as with the
+:data:`~flask:MAX_CONTENT_LENGTH` setting of Flask. The framework would answer 413 before the
+service, without a SCIM error.
+
+:meth:`~scim2_server.service.ScimService.max_body_size` only limits the bulk requests
+(:rfc:`RFC 7644 §3.7.4 <7644#section-3.7.4>`). To protect the memory of the server from the other
+requests, limit the size of the bodies in the reverse proxy, above ``maxPayloadSize``.
 
 Route the requests
 ------------------
