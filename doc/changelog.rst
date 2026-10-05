@@ -1,8 +1,8 @@
 Changelog
 =========
 
-[Unreleased]
-------------
+[0.5.0] - 2026-10-05
+--------------------
 
 scim2-server becomes a library to build SCIM servers upon, and no longer depends on Werkzeug.
 
