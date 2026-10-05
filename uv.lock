@@ -1136,7 +1136,7 @@ wheels = [
 
 [[package]]
 name = "scim2-server"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "scim2-models" },
