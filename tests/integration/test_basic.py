@@ -288,14 +288,22 @@ class TestSCIMApplicationBasic:
         assert [resource["id"] for resource in r.json()["Resources"]] == ids[::-1]
 
 
-@pytest.mark.parametrize("content_type", ["text/plain", None])
-def test_a_body_that_is_not_json_answers_415(wsgi, content_type):
-    """A request body without a JSON media type is refused with a 415."""
-    headers = {"Content-Type": content_type} if content_type else {}
+def test_a_body_that_is_not_json_answers_415(wsgi):
+    """A request body with another media type than JSON is refused with a 415."""
+    headers = {"Content-Type": "text/plain"}
     r = wsgi.post("/v2/Users", content=b'{"userName": "bjensen"}', headers=headers)
 
     assert r.status_code == 415
     assert r.json()["status"] == "415"
+
+
+@pytest.mark.parametrize("headers", [{}, {"Content-Type": ""}])
+def test_a_body_without_media_type_is_read_as_json(wsgi, headers):
+    """RFC 7644 §3.8: JSON is the default format of a request body."""
+    r = wsgi.post("/v2/Users", content=b'{"userName": "bjensen"}', headers=headers)
+
+    assert r.status_code == 201
+    assert r.json()["userName"] == "bjensen"
 
 
 def test_a_json_body_is_accepted(wsgi):

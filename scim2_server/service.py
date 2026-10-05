@@ -434,8 +434,13 @@ class ScimService:
 
     @staticmethod
     def ensure_json(content_type: str | None) -> None:
-        """Refuse with a 415 a request body that is not JSON."""
-        if not is_json_media_type(content_type):
+        """Refuse with a 415 a request body that is not JSON.
+
+        Per :rfc:`RFC 7644 §3.8 <7644#section-3.8>`, JSON is the default
+        format: a body without a :mdn:`Content-Type`, or with an empty one,
+        is read as JSON.
+        """
+        if content_type and not is_json_media_type(content_type):
             raise UnsupportedMediaTypeException
 
     def read_body(

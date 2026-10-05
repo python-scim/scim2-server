@@ -12,6 +12,7 @@ Fixed
 ^^^^^
 - Every failed bulk operation has a location, except a failed POST, which has none. scim2-client
   no longer rejects these bulk responses.
+- A request body without :mdn:`Content-Type` is read as JSON, instead of answering 415.
 
 [0.6.0] - 2026-10-05
 --------------------
