@@ -50,8 +50,11 @@ class EntityTags:
     def matches(self, version: str | None) -> bool:
         """Tell whether a resource version matches the header, with the weak comparison.
 
-        Both :mdn:`If-Match` and :mdn:`If-None-Match` use the weak comparison
-        (:rfc:`RFC 9110 §8.8.3.2 <9110#section-8.8.3.2>`).
+        Both :mdn:`If-Match` and :mdn:`If-None-Match` use the weak comparison.
+        Per :rfc:`RFC 9110 §13.1.1 <9110#section-13.1.1>`, ``If-Match`` uses the
+        strong comparison. But SCIM prefers weak ETags
+        (:rfc:`RFC 7644 §3.14 <7644#section-3.14>`), and the strong comparison
+        never matches them.
 
         :param version: The version of the resource, or :data:`None` when the
             service does not version its resources.
