@@ -16,6 +16,9 @@ Fixed
   no longer rejects these bulk responses.
 - A request body without :mdn:`Content-Type` is read as JSON, instead of answering 415.
 - Each response carrying a resource has a :mdn:`Content-Location` header with ``meta.location``.
+- A provider without ``config`` announces PATCH, and no other capability. It announced every
+  capability, even those its storage does not implement. A filter or a sort now answers 501,
+  until the ``config`` announces it.
 
 [0.6.0] - 2026-10-05
 --------------------

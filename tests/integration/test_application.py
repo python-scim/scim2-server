@@ -145,15 +145,27 @@ class TestApplication:
         assert published["filter"] == {"supported": False}
 
     def test_service_provider_configuration_defaults(self, storage):
-        """A provider carrying no configuration is served the default one."""
+        """A provider carrying no configuration announces PATCH, and no other capability."""
         provider = ScimProvider(models=[User])
         transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
             published = client.get("/v2/ServiceProviderConfig").json()
-        del published["meta"]
-        assert published == load_default_service_provider_config().model_dump()
+            filtered = client.get("/v2/Users", params={"filter": 'userName eq "x"'})
+            sorted_ = client.get("/v2/Users", params={"sortBy": "userName"})
+            created = client.post("/v2/Users", json={"userName": "bjensen"})
+        assert published["patch"] == {"supported": True}
+        assert published["bulk"] == {
+            "supported": False,
+            "maxOperations": 0,
+            "maxPayloadSize": 0,
+        }
+        for capability in ("filter", "changePassword", "sort", "etag"):
+            assert published[capability] == {"supported": False}
+        assert filtered.status_code == 501
+        assert sorted_.status_code == 501
+        assert "ETag" not in created.headers
 
     def test_schemas(self, wsgi):
         r = wsgi.get("/v2/Schemas")

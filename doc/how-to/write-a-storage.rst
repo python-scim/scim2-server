@@ -253,7 +253,9 @@ The search of the example reads every resource. A database storage translates th
   ``totalResults`` would be wrong.
 
 The server already refuses a filter or a sort that its
-:class:`~scim2_models.ServiceProviderConfig` does not announce. A storage that cannot search
+:class:`~scim2_models.ServiceProviderConfig` does not announce. A provider without ``config``
+announces PATCH, and no other capability. Announce the filter, the sort and the ETags in the
+``config`` of the provider once the storage supports them. A storage that cannot search
 several resource types at once raises :class:`~scim2_models.NotImplementedException` when it
 receives more than one.
 

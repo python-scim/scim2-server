@@ -14,8 +14,10 @@ from scim2_models import Bulk
 from scim2_models import BulkOperation
 from scim2_models import BulkRequest
 from scim2_models import BulkResponse
+from scim2_models import ChangePassword
 from scim2_models import Context
 from scim2_models import Error
+from scim2_models import ETag
 from scim2_models import Filter
 from scim2_models import ForbiddenException
 from scim2_models import InvalidSyntaxException
@@ -46,7 +48,6 @@ from scim2_server.responses import ScimResponse
 from scim2_server.routing import Operation
 from scim2_server.routing import Target
 from scim2_server.routing import match
-from scim2_server.utils import load_default_service_provider_config
 from scim2_server.utils import parametrize
 
 
@@ -105,6 +106,23 @@ def is_json_media_type(content_type: str | None) -> bool:
     )
 
 
+def patch_only_config() -> ServiceProviderConfig:
+    """Return the configuration of a service that only supports PATCH.
+
+    PATCH only needs the storage to update a resource, so every storage
+    supports it. The other capabilities need a storage that implements them.
+    """
+    return ServiceProviderConfig(
+        patch=Patch(supported=True),
+        bulk=Bulk(supported=False, max_operations=0, max_payload_size=0),
+        filter=Filter(supported=False),
+        change_password=ChangePassword(supported=False),
+        sort=Sort(supported=False),
+        etag=ETag(supported=False),
+        authentication_schemes=[],
+    )
+
+
 class ScimService:
     """The SCIM protocol, without input or output.
 
@@ -116,6 +134,9 @@ class ScimService:
     reads the request, and turns the :class:`~scim2_server.responses.ScimResponse`
     into a response of the framework.
 
+    A provider without ``config`` announces PATCH, and no other capability.
+    The storage must implement each capability the configuration announces.
+
     Every public method can be overridden. ``base_url`` is the root URL of the
     SCIM endpoints, as the client sees it, such as
     ``https://example.com/scim/v2``.
@@ -123,7 +144,7 @@ class ScimService:
 
     def __init__(self, provider: ScimProvider):
         self.provider = provider
-        self.config = provider.config or load_default_service_provider_config()
+        self.config = provider.config or patch_only_config()
 
     # -- Resource types and models --------------------------------------
 
