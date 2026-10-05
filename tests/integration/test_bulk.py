@@ -3,9 +3,14 @@ import json
 
 import pytest
 from scim2_models import Bulk
+from scim2_models import BulkResponse
+from scim2_models import Context
+from scim2_models import EnterpriseUser
 from scim2_models import ETag
+from scim2_models import Group
 from scim2_models import Patch
 from scim2_models import ScimProvider
+from scim2_models import User
 from werkzeug.test import EnvironBuilder
 from werkzeug.test import run_wsgi_app
 
@@ -17,10 +22,16 @@ PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
 
 
 def bulk(client, operations, **attributes):
-    return client.post(
+    """Send a bulk request, and check that a client can read its response."""
+    response = client.post(
         "/v2/Bulk",
         json={"schemas": [BULK_REQUEST], "Operations": operations, **attributes},
     )
+    if response.status_code == 200:
+        BulkResponse[User[EnterpriseUser] | Group].model_validate(
+            response.json(), scim_ctx=Context.BULK_RESPONSE
+        )
+    return response
 
 
 def create_user(user_name, bulk_id="u"):
@@ -186,33 +197,37 @@ class TestBulkOperationErrors:
         assert result["location"] == "https://scim.example.com/v2/Users/unknown"
 
     def test_unknown_endpoint(self, wsgi):
-        """An operation on an endpoint that serves no resource type answers 400 invalidPath."""
+        """An operation on an endpoint that serves no resource type answers 400 invalidPath, with the URL of its path."""
         (result,) = bulk(wsgi, [{"method": "DELETE", "path": "/Unknown/x"}]).json()[
             "Operations"
         ]
         assert result["status"] == "400"
         assert result["response"]["scimType"] == "invalidPath"
-        assert "location" not in result
+        assert result["location"] == "https://scim.example.com/v2/Unknown/x"
 
-    @pytest.mark.parametrize(
-        "operation",
-        [
-            {"method": "POST", "path": "/Users/x", "bulkId": "a", "data": {}},
-            {"method": "DELETE", "path": "/Users"},
-        ],
-        ids=["post-to-a-resource", "delete-an-endpoint"],
-    )
-    def test_path_does_not_fit_the_method(self, wsgi, operation):
-        """RFC 7644 §3.7: a POST targets a resource type endpoint, other methods a resource."""
+    def test_post_to_a_resource(self, wsgi):
+        """RFC 7644 §3.7: a POST targets a resource type endpoint, and fails without a location otherwise."""
+        operation = {"method": "POST", "path": "/Users/x", "bulkId": "a", "data": {}}
         (result,) = bulk(wsgi, [operation]).json()["Operations"]
         assert result["status"] == "400"
         assert result["response"]["scimType"] == "invalidValue"
+        assert "location" not in result
+
+    def test_delete_an_endpoint(self, wsgi):
+        """RFC 7644 §3.7: a DELETE targets a resource, and fails with the URL of its path otherwise."""
+        (result,) = bulk(wsgi, [{"method": "DELETE", "path": "/Users"}]).json()[
+            "Operations"
+        ]
+        assert result["status"] == "400"
+        assert result["response"]["scimType"] == "invalidValue"
+        assert result["location"] == "https://scim.example.com/v2/Users"
 
     def test_path_is_required(self, wsgi):
-        """RFC 7644 §3.7: the path of an operation is required."""
+        """RFC 7644 §3.7: the path of an operation is required. The operation fails with the root URL as location."""
         (result,) = bulk(wsgi, [{"method": "DELETE"}]).json()["Operations"]
         assert result["status"] == "400"
         assert result["response"]["detail"] == "path is required for request operations"
+        assert result["location"] == "https://scim.example.com/v2/"
 
     @pytest.mark.parametrize(
         "operation",
@@ -576,6 +591,14 @@ class TestBulkIdReferences:
             result["response"]["detail"]
             == "No resource was created with the bulkId unknown"
         )
+
+    def test_unknown_reference_in_the_path(self, wsgi):
+        """An operation whose path references no creation answers 409 with the URL of its path."""
+        (result,) = bulk(
+            wsgi, [{"method": "DELETE", "path": "/Users/bulkId:unknown"}]
+        ).json()["Operations"]
+        assert result["status"] == "409"
+        assert result["location"] == "https://scim.example.com/v2/Users/bulkId:unknown"
 
     def test_reference_to_a_failed_creation(self, wsgi):
         """A reference to a creation that failed answers 409."""

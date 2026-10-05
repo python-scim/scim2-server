@@ -1,6 +1,18 @@
 Changelog
 =========
 
+[0.6.1] - Unreleased
+--------------------
+
+Changed
+^^^^^^^
+- :meth:`~scim2_server.service.ScimService.bulk_outcome` takes the base URL.
+
+Fixed
+^^^^^
+- Every failed bulk operation has a location, except a failed POST, which has none. scim2-client
+  no longer rejects these bulk responses.
+
 [0.6.0] - 2026-10-05
 --------------------
 

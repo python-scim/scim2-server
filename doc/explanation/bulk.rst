@@ -64,9 +64,9 @@ next operations run. :attr:`~scim2_models.BulkRequest.fail_on_errors` caps the n
 is reached, the remaining operations do not run, and the response lists the results of the
 operations that ran.
 
-A failed operation keeps the location of its resource, when it has one. Per
-:rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>`, every result has a location, except the result of a
-failed POST.
+Per :rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>`, every result has a location, except the result
+of a failed POST. A failed operation keeps the location of its resource. When the operation
+targets no known resource, such as an unknown endpoint, its location is the URL of its path.
 
 The limits
 ----------

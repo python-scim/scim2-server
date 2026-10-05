@@ -798,9 +798,24 @@ class ScimService:
         )
 
     @staticmethod
-    def bulk_outcome(operation: BulkOperation[Resource[Any]]) -> dict[str, Any]:
-        """Start the outcome of a bulk operation, before it runs."""
-        return {"method": operation.method, "bulk_id": operation.bulk_id}
+    def bulk_outcome(
+        base_url: str, operation: BulkOperation[Resource[Any]]
+    ) -> dict[str, Any]:
+        """Start the outcome of a bulk operation, before it runs.
+
+        :rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>` requires a location for
+        every operation but a failed POST. Until the operation is located, its
+        location is the URL of its path, so that an operation with an unknown
+        endpoint or an unresolved reference still has one.
+        """
+        outcome: dict[str, Any] = {
+            "method": operation.method,
+            "bulk_id": operation.bulk_id,
+        }
+        if operation.method != BulkOperation.Method.post:
+            path = (operation.path or "").lstrip("/")
+            outcome["location"] = f"{base_url.rstrip('/')}/{path}"
+        return outcome
 
     def locate_bulk_operation(
         self,
@@ -811,11 +826,14 @@ class ScimService:
         """Return the resource type a resolved bulk operation targets, and locate its resource.
 
         The location is set before the operation runs, so a failure still
-        knows it. :rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>` requires it for
-        every operation but a failed POST.
+        knows it. A POST only gets a location when it succeeds.
         """
         resource_type = self.get_resource_type_by_endpoint(operation.endpoint or "")
-        if resource_type is not None and operation.resource_id:
+        if (
+            resource_type is not None
+            and operation.resource_id
+            and operation.method != BulkOperation.Method.post
+        ):
             outcome["location"] = self.resource_location(
                 base_url, resource_type, operation.resource_id
             )

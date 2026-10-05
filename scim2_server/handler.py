@@ -252,7 +252,7 @@ class ScimHandler:
         :return: The outcome of the step, and the resource it created or updated.
         """
         operation = plan.operation(step)
-        outcome = self.service.bulk_outcome(operation)
+        outcome = self.service.bulk_outcome(request.base_url, operation)
         try:
             operation = plan.resolve(step)
             resource_type = self.service.locate_bulk_operation(
@@ -584,7 +584,7 @@ class AsyncScimHandler:
         :return: The outcome of the step, and the resource it created or updated.
         """
         operation = plan.operation(step)
-        outcome = self.service.bulk_outcome(operation)
+        outcome = self.service.bulk_outcome(request.base_url, operation)
         try:
             operation = plan.resolve(step)
             resource_type = self.service.locate_bulk_operation(
