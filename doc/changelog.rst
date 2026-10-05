@@ -13,6 +13,7 @@ Changed
 ^^^^^^^
 - :meth:`~scim2_server.handler.ScimHandler.run_bulk_step` takes the bulk request instead of its
   base URL.
+- The storage contract accepts a version that only changes with the content of the resource.
 
 [0.5.0] - 2026-10-05
 --------------------
