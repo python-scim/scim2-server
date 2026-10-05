@@ -77,6 +77,7 @@ def test_me_serves_the_resource_of_the_subject(handler):
     assert response.body["id"] == user_id
     assert response.headers["Location"] == f"{BASE_URL}/Users/{user_id}"
     assert response.body["meta"]["location"] == response.headers["Location"]
+    assert response.headers["Content-Location"] == response.headers["Location"]
 
 
 def test_me_can_stand_for_another_resource_type(handler):

@@ -505,9 +505,15 @@ class ScimService:
         response_parameters: ResponseParameters[Any] | None = None,
         status: HTTPStatus = HTTPStatus.OK,
     ) -> ScimResponse:
-        """Return the response carrying a published resource, with its ETag."""
-        assert resource.meta is not None
-        headers = {"ETag": resource.meta.version} if resource.meta.version else {}
+        """Return the response carrying a published resource, with its ETag.
+
+        Per :rfc:`RFC 7643 §3.1 <7643#section-3.1>`, the
+        :mdn:`Content-Location` header holds ``meta.location``.
+        """
+        assert resource.meta is not None and resource.meta.location is not None
+        headers = {"Content-Location": resource.meta.location}
+        if resource.meta.version:
+            headers["ETag"] = resource.meta.version
         body = resource.model_dump(
             scim_ctx=scim_ctx, response_parameters=response_parameters
         )
@@ -923,6 +929,16 @@ class ScimService:
         meta = Meta(resource_type=type(resource).__name__, location=location)
         return resource.model_copy(update={"meta": meta})
 
+    @staticmethod
+    def discovery_response(resource: DiscoveryResourceT) -> ScimResponse:
+        """Return the response carrying a discovery resource, with its :mdn:`Content-Location`."""
+        assert resource.meta is not None and resource.meta.location is not None
+        return ScimResponse(
+            HTTPStatus.OK,
+            resource.model_dump(),
+            {"Content-Location": resource.meta.location},
+        )
+
     def service_provider_config(
         self, location: str, query: Mapping[str, str]
     ) -> ScimResponse:
@@ -931,9 +947,7 @@ class ScimService:
         :param location: The URL of the endpoint.
         """
         self.forbid_filter(query)
-        return ScimResponse(
-            HTTPStatus.OK, self.locate(self.config, location).model_dump()
-        )
+        return self.discovery_response(self.locate(self.config, location))
 
     def resource_types(self, location: str, query: Mapping[str, str]) -> ScimResponse:
         """Return the list of the resource types."""
@@ -954,9 +968,7 @@ class ScimService:
         self.forbid_filter(query)
         for resource_type in self.provider.resource_types:
             if resource_type.id == resource_type_id:
-                return ScimResponse(
-                    HTTPStatus.OK, self.locate(resource_type, location).model_dump()
-                )
+                return self.discovery_response(self.locate(resource_type, location))
         raise NotFoundException(detail=f"Resource type {resource_type_id!r} not found")
 
     def schemas(self, location: str, query: Mapping[str, str]) -> ScimResponse:
@@ -978,9 +990,7 @@ class ScimService:
         self.forbid_filter(query)
         for schema in self.provider.schemas:
             if schema.id == schema_id:
-                return ScimResponse(
-                    HTTPStatus.OK, self.locate(schema, location).model_dump()
-                )
+                return self.discovery_response(self.locate(schema, location))
         raise NotFoundException(detail=f"Schema {schema_id!r} not found")
 
     # -- Errors ---------------------------------------------------------

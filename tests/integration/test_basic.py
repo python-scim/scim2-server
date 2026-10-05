@@ -6,6 +6,9 @@ from scim2_models import PatchOp
 from scim2_models import PatchOperation
 from scim2_models import User
 
+PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
+
 
 class TestSCIMApplicationBasic:
     def test_user_creation(self, wsgi):
@@ -327,3 +330,60 @@ def test_a_search_body_that_is_not_valid_json_answers_400(wsgi):
 
     assert r.status_code == 400
     assert r.json()["scimType"] == "invalidSyntax"
+
+
+class TestContentLocation:
+    """RFC 7643 §3.1: meta.location is the same as the Content-Location header."""
+
+    def test_creation(self, wsgi):
+        """A creation gives the location of the resource in Location and Content-Location."""
+        r = wsgi.post("/v2/Users", json={"userName": "bjensen"})
+        assert r.status_code == 201
+        assert r.headers["Content-Location"] == r.json()["meta"]["location"]
+        assert r.headers["Content-Location"] == r.headers["Location"]
+
+    @pytest.mark.parametrize("method", ["GET", "PUT", "PATCH"])
+    def test_response_carrying_a_resource(self, wsgi, first_fake_user, method):
+        """A response carrying a resource gives its location in Content-Location."""
+        url = f"/v2/Users/{first_fake_user}"
+        bodies = {
+            "PUT": {"userName": "bjensen"},
+            "PATCH": {
+                "schemas": [PATCH_OP],
+                "Operations": [{"op": "replace", "path": "nickName", "value": "Babs"}],
+            },
+        }
+        r = wsgi.request(
+            method, url, params={"attributes": "userName"}, json=bodies.get(method)
+        )
+        assert r.status_code == 200
+        location = f"https://scim.example.com{url}"
+        assert r.headers["Content-Location"] == location
+        assert wsgi.get(url).json()["meta"]["location"] == location
+
+    def test_patch_without_content(self, wsgi, first_fake_user):
+        """A PATCH that answers 204 carries no representation, and no Content-Location."""
+        r = wsgi.patch(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "schemas": [PATCH_OP],
+                "Operations": [{"op": "replace", "path": "nickName", "value": "Babs"}],
+            },
+        )
+        assert r.status_code == 204
+        assert "Content-Location" not in r.headers
+
+    def test_list(self, wsgi):
+        """A list of resources has no Content-Location."""
+        r = wsgi.get("/v2/Users")
+        assert "Content-Location" not in r.headers
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/ServiceProviderConfig", "/ResourceTypes/User", "/Schemas/" + USER_SCHEMA],
+    )
+    def test_discovery_resource(self, wsgi, path):
+        """A discovery resource gives its location in Content-Location."""
+        r = wsgi.get(f"/v2{path}")
+        assert r.headers["Content-Location"] == r.json()["meta"]["location"]
+        assert r.headers["Content-Location"] == f"https://scim.example.com/v2{path}"

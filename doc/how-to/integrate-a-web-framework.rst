@@ -222,7 +222,8 @@ The handler returns generic SCIM responses, independent of any framework. Turn e
 
 - the status from :attr:`~scim2_server.responses.ScimResponse.status`;
 - the headers from :attr:`~scim2_server.responses.ScimResponse.headers`, which hold the
-  ``Content-Type``, and the :mdn:`ETag` and :mdn:`Location` when the response has them;
+  ``Content-Type``, and the :mdn:`ETag`, :mdn:`Location` and :mdn:`Content-Location` when the
+  response has them;
 - the body from :attr:`~scim2_server.responses.ScimResponse.body`, serialized as JSON, or no body
   when it is :data:`None`.
 
