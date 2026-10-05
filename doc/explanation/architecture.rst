@@ -16,8 +16,8 @@ A SCIM server does four kinds of work. scim2-server gives each one to a separate
      - Does
      - Does not
    * - :class:`~scim2_server.service.ScimService`
-     - Routes and validates the requests, applies PUT and PATCH, evaluates the ETags, and builds
-       the responses and the URLs of the resources.
+     - Routes, authorizes and validates the requests, applies PUT and PATCH, evaluates the
+       ETags, and builds the responses and the URLs of the resources.
      - No input or output, no web framework.
    * - :class:`~scim2_server.handler.ScimHandler` and
        :class:`~scim2_server.handler.AsyncScimHandler`
@@ -79,6 +79,34 @@ the response. For instance, per :rfc:`RFC 9110 §13.1.1 <9110#section-13.1.1>`, 
 uses the strong comparison, which never matches the weak ETags of
 :rfc:`RFC 7644 §3.14 <7644#section-3.14>`. The service compares both headers weakly, whatever the
 framework.
+
+Why the service authorizes the operations
+-----------------------------------------
+
+The application decides what each client may do, in
+:meth:`~scim2_server.service.ScimService.authorize`. The service decides when to call it. A
+check before the handler only sees the method and the URL of the request. A bulk request is one
+``POST /Bulk``, whatever its operations. A search at the root is one ``GET /``, whatever the
+resource types it covers. The service knows each operation and each resource type, so it calls
+:meth:`~scim2_server.service.ScimService.authorize` for each one.
+
+A storage bound to the client also sees every operation. It does not know the protocol, though:
+a PUT and a PATCH both reach :meth:`~scim2_server.storage.ScimStorage.update`, and a request on
+``/Me`` reaches the storage as a request on the URL of the resource. A storage can also only hide
+a resource, with a 404. The storage still enforces the rules that depend on the stored
+resources, such as the organization of a user. For these rules, a 404 fits: the client
+does not learn that a resource of another organization exists.
+
+The service calls :meth:`~scim2_server.service.ScimService.authorize` after the routing, before
+it validates the body, and before the handler calls the storage. A refused client gets a 403,
+whatever its body and whatever the resource it targets. The client learns nothing about the
+expected data, and nothing about the existence of a resource.
+
+Like every step of the service, :meth:`~scim2_server.service.ScimService.authorize` does no
+input or output, and both handlers call the same method. One request can call it many times:
+once per operation of a bulk request, and once per resource type of a search at the root. A
+query to a database or a directory in the method would run as many times. The application loads
+the rights of the client once, before it calls the handler.
 
 Where scim2-models stops
 ------------------------

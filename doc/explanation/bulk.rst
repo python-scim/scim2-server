@@ -45,6 +45,17 @@ instead return HTTP status code 409 (Conflict)".
 
 scim2-server answers 409 to the operations of the cycle.
 
+Authorization
+-------------
+
+The server authorizes each operation on its own, with
+:meth:`~scim2_server.service.ScimService.authorize`. The server first resolves the references of
+the operation, so :meth:`~scim2_server.service.ScimService.authorize` receives the ``id`` of the
+resource the operation acts on. The server then authorizes the operation, before it reports the
+validation errors of the operation. A refused client gets a 403, even when its data is invalid,
+and learns nothing about the expected data. An operation on an endpoint that serves no resource
+type fails with a 400, without authorization.
+
 Failures
 --------
 

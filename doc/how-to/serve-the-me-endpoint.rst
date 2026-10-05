@@ -14,31 +14,10 @@ Pass the subject
 ----------------
 
 Pass the authenticated client in the ``subject`` of the
-:class:`~scim2_server.requests.ScimRequest`. The service does not read it. It passes it to
-:meth:`~scim2_server.service.ScimService.me_target` and
-:meth:`~scim2_server.service.ScimService.me_creation_type`. It can be the user of the framework,
-the claims of a token, or any other object.
-
-The following sketch passes the client of :doc:`authenticate-the-clients`:
-
-.. tab-set::
-   :class: outline
-
-   .. tab-item:: Sync
-      :sync: sync
-
-      .. code-block:: python
-
-          scim = scim_request()
-          scim.subject = g.client
-
-   .. tab-item:: Async
-      :sync: async
-
-      .. code-block:: python
-
-          scim = await scim_request(request)
-          scim.subject = client
+:class:`~scim2_server.requests.ScimRequest`, as in :ref:`pass-the-client`. The service passes it
+to :meth:`~scim2_server.service.ScimService.me_target` and
+:meth:`~scim2_server.service.ScimService.me_creation_type`. The subject can be the user of the
+framework, the claims of a token, or any other object.
 
 Find the resource of the subject
 --------------------------------
@@ -66,7 +45,10 @@ no resource. An application that accepts anonymous requests raises
     ...         return self.get_resource_type("User"), request.subject["user_id"]
 
 The handler then serves ``GET``, ``PUT``, ``PATCH`` and ``DELETE`` on ``/Me`` as on the URL of
-the resource. Each response carries the URL of the resource in its :mdn:`Location` header:
+the resource. :meth:`~scim2_server.service.ScimService.authorize` checks them as operations on
+this resource, after :meth:`~scim2_server.service.ScimService.me_target` finds it
+(:doc:`authenticate-the-clients`). Each response carries the URL of the resource in its
+:mdn:`Location` header:
 
 .. doctest::
 

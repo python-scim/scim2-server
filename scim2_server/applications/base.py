@@ -42,8 +42,8 @@ class BaseApplication:
         """Return the authenticated subject of a request.
 
         It returns :data:`None` by default. Override it to pass the subject
-        that :meth:`check_auth` authenticated to the service, for instance to
-        serve ``/Me``.
+        that :meth:`check_auth` authenticated to the service, for
+        :meth:`~scim2_server.service.ScimService.authorize` and ``/Me``.
         """
         return None
 
@@ -51,9 +51,11 @@ class BaseApplication:
         """Authenticate the client of a request.
 
         It accepts every request. Override it, and raise
-        :class:`~scim2_models.UnauthorizedException` or
-        :class:`~scim2_models.ForbiddenException` to refuse a request. It is
-        not called for ``/ServiceProviderConfig`` (:rfc:`RFC 7643 §5 <7643#section-5>`).
+        :class:`~scim2_models.UnauthorizedException` to refuse a request
+        whose credentials are missing or invalid. Check the rights of the
+        client in :meth:`~scim2_server.service.ScimService.authorize`, which
+        sees each operation of a bulk request. It is not called for
+        ``/ServiceProviderConfig`` (:rfc:`RFC 7643 §5 <7643#section-5>`).
         """
 
     def needs_auth(self, request: ScimRequest) -> bool:

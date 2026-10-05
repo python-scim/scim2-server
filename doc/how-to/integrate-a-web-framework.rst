@@ -71,7 +71,7 @@ framework into a :class:`~scim2_server.requests.ScimRequest`, with these values:
 - ``headers``: the headers, as a mapping or as pairs. The handler reads :mdn:`Content-Type`,
   :mdn:`If-Match` and :mdn:`If-None-Match`;
 - ``body``: the raw body, as :class:`bytes`;
-- ``subject``: the authenticated client, if any. :doc:`serve-the-me-endpoint` uses it.
+- ``subject``: the authenticated client, if any. :doc:`authenticate-the-clients` sets it.
 
 The following sketch builds the request with Flask and FastAPI, for SCIM endpoints served under
 ``/scim/v2``:
