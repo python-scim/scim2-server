@@ -62,6 +62,13 @@ BULK_SUCCESS_STATUS = {
     BulkOperation.Method.delete: HTTPStatus.NO_CONTENT,
 }
 
+BULK_OPERATIONS = {
+    BulkOperation.Method.post: Operation.create,
+    BulkOperation.Method.put: Operation.replace,
+    BulkOperation.Method.patch: Operation.patch,
+    BulkOperation.Method.delete: Operation.delete,
+}
+
 CHALLENGES = {
     AuthenticationScheme.Type.oauthbearertoken: 'Bearer realm="SCIM"',
     AuthenticationScheme.Type.oauth2: 'Bearer realm="SCIM"',
@@ -240,6 +247,91 @@ class ScimService:
                 target.resource_id,
             )
         return response
+
+    def authorize(
+        self, request: ScimRequest, target: Target, resource_type: ResourceType
+    ) -> None:
+        """Accept or refuse an operation on a resource type (:rfc:`RFC 7644 §2 <7644#section-2>`).
+
+        Override this method to check the rights of the client. It reads the
+        authenticated subject in :attr:`ScimRequest.subject
+        <scim2_server.requests.ScimRequest.subject>`. By default, every
+        operation is accepted.
+
+        The service calls this method before it validates the request body,
+        and before the handler calls the storage. For a ``/Me`` request, the
+        service calls it after :meth:`me_target` or :meth:`me_creation_type`
+        finds the resource, and :attr:`Target.me
+        <scim2_server.routing.Target.me>` is :data:`True`.
+
+        The service can call this method several times for one request: once
+        per operation of a bulk request, and once per resource type of a
+        search at the root. The method must not do any input or output. The
+        subject must arrive with everything the decision needs, such as its
+        permissions or the scopes of its token.
+
+        In a bulk request, ``target`` describes the operation, and ``request``
+        holds the bulk request. Read the operation in ``target``, never in the
+        method or the path of ``request``.
+
+        In a search at the root, ``target.endpoint`` is :data:`None`, and
+        ``resource_type`` is one of the searched types. A
+        :class:`~scim2_models.ForbiddenException` removes this type from the
+        search. The search answers 403 when every type is removed.
+
+        :raises ~scim2_models.ForbiddenException: When the client may not
+            perform the operation, for a 403.
+        :raises ~scim2_models.UnauthorizedException: When the request has no
+            authenticated subject, for an application that accepts anonymous
+            requests. It answers 401.
+        """
+
+    def authorize_bulk_operation(
+        self,
+        request: ScimRequest,
+        operation: BulkOperation[Resource[Any]],
+        resource_type: ResourceType | None,
+    ) -> None:
+        """Authorize a resolved bulk operation with :meth:`authorize`.
+
+        An operation without a known resource type or a valid method keeps its
+        validation error, without authorization.
+        """
+        if resource_type is None or operation.method is None:
+            return
+        target = Target(
+            BULK_OPERATIONS[operation.method],
+            endpoint=self.endpoint_of(resource_type),
+            resource_id=operation.resource_id,
+        )
+        self.authorize(request, target, resource_type)
+
+    def authorized_types(
+        self, request: ScimRequest, target: Target, resource_types: list[ResourceType]
+    ) -> list[ResourceType]:
+        """Return the resource types the client may search, according to :meth:`authorize`.
+
+        At the root, the refused types are left out of the search
+        (:rfc:`RFC 7644 §3.4.2.1 <7644#section-3.4.2.1>`).
+
+        :raises ~scim2_models.ForbiddenException: When the client may search
+            none of the types.
+        """
+        if target.endpoint is not None:
+            for resource_type in resource_types:
+                self.authorize(request, target, resource_type)
+            return resource_types
+
+        authorized = []
+        for resource_type in resource_types:
+            try:
+                self.authorize(request, target, resource_type)
+            except ForbiddenException:
+                continue
+            authorized.append(resource_type)
+        if not authorized:
+            raise ForbiddenException(detail="No resource type may be searched")
+        return authorized
 
     @staticmethod
     def read_conditions(request: ScimRequest) -> Conditions:

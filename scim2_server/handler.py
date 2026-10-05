@@ -56,6 +56,7 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.create)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             resource = self.service.read_creation(
                 resource_type, request.body, request.header("Content-Type")
             )
@@ -68,6 +69,7 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.query)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             response_parameters = self.service.read_response_parameters(
                 resource_type, request.query
             )
@@ -88,6 +90,7 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.replace)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             response_parameters = self.service.read_response_parameters(
                 resource_type, request.query
             )
@@ -112,6 +115,7 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.patch)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             response_parameters = self.service.read_response_parameters(
                 resource_type, request.query
             )
@@ -135,6 +139,7 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.delete)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             with self.storage.operation():
                 self.delete_resource(
                     resource_type,
@@ -194,11 +199,14 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.search)
             resource_types = self.service.searched_types(target.endpoint)
+            authorized_types = self.service.authorized_types(
+                request, target, resource_types
+            )
             search_request = self.service.read_search_query(
                 resource_types, request.query
             )
             with self.storage.operation():
-                total, resources = self.storage.search(resource_types, search_request)
+                total, resources = self.storage.search(authorized_types, search_request)
             return self.service.search_response(
                 request.base_url, total, resources, search_request
             )
@@ -208,11 +216,14 @@ class ScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.search_with_body)
             resource_types = self.service.searched_types(target.endpoint)
+            authorized_types = self.service.authorized_types(
+                request, target, resource_types
+            )
             search_request = self.service.read_search_body(
                 resource_types, request.body, request.header("Content-Type")
             )
             with self.storage.operation():
-                total, resources = self.storage.search(resource_types, search_request)
+                total, resources = self.storage.search(authorized_types, search_request)
             return self.service.search_response(
                 request.base_url, total, resources, search_request
             )
@@ -225,17 +236,18 @@ class ScimHandler:
             self.service.route(request, Operation.bulk)
             plan = self.service.read_bulk(request.body, request.header("Content-Type"))
             for step in plan:
-                result, resource = self.run_bulk_step(request.base_url, plan, step)
+                result, resource = self.run_bulk_step(request, plan, step)
                 plan.record(step, result, resource)
             return self.service.bulk_response(plan)
 
     def run_bulk_step(
-        self, base_url: str, plan: BulkPlan, step: BulkStep
+        self, request: ScimRequest, plan: BulkPlan, step: BulkStep
     ) -> tuple[dict[str, Any], Resource[Any] | None]:
         """Apply one step of a bulk request.
 
-        An operation that failed its validation keeps its error, once its
-        references are resolved to locate it.
+        The step resolves the references of the operation, locates it and
+        authorizes it. An operation that failed its validation then keeps its
+        error.
 
         :return: The outcome of the step, and the resource it created or updated.
         """
@@ -244,8 +256,9 @@ class ScimHandler:
         try:
             operation = plan.resolve(step)
             resource_type = self.service.locate_bulk_operation(
-                base_url, operation, outcome
+                request.base_url, operation, outcome
             )
+            self.service.authorize_bulk_operation(request, operation, resource_type)
             failure = self.service.bulk_validation_failure(operation, outcome)
             if failure is not None:
                 return failure, None
@@ -256,7 +269,7 @@ class ScimHandler:
         except Exception as exception:
             return self.service.bulk_failure(outcome, exception), None
         return self.service.bulk_success(
-            base_url, operation, outcome, resource
+            request.base_url, operation, outcome, resource
         ), resource
 
     def apply_bulk_operation(
@@ -365,6 +378,7 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.create)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             resource = self.service.read_creation(
                 resource_type, request.body, request.header("Content-Type")
             )
@@ -377,6 +391,7 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.query)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             response_parameters = self.service.read_response_parameters(
                 resource_type, request.query
             )
@@ -397,6 +412,7 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.replace)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             response_parameters = self.service.read_response_parameters(
                 resource_type, request.query
             )
@@ -423,6 +439,7 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.patch)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             response_parameters = self.service.read_response_parameters(
                 resource_type, request.query
             )
@@ -446,6 +463,7 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.delete)
             resource_type = self.service.resource_type_at(cast(str, target.endpoint))
+            self.service.authorize(request, target, resource_type)
             async with self.storage.operation():
                 await self.delete_resource(
                     resource_type,
@@ -509,12 +527,15 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.search)
             resource_types = self.service.searched_types(target.endpoint)
+            authorized_types = self.service.authorized_types(
+                request, target, resource_types
+            )
             search_request = self.service.read_search_query(
                 resource_types, request.query
             )
             async with self.storage.operation():
                 total, resources = await self.storage.search(
-                    resource_types, search_request
+                    authorized_types, search_request
                 )
             return self.service.search_response(
                 request.base_url, total, resources, search_request
@@ -525,12 +546,15 @@ class AsyncScimHandler:
         with self.service.provider:
             target = self.service.route(request, Operation.search_with_body)
             resource_types = self.service.searched_types(target.endpoint)
+            authorized_types = self.service.authorized_types(
+                request, target, resource_types
+            )
             search_request = self.service.read_search_body(
                 resource_types, request.body, request.header("Content-Type")
             )
             async with self.storage.operation():
                 total, resources = await self.storage.search(
-                    resource_types, search_request
+                    authorized_types, search_request
                 )
             return self.service.search_response(
                 request.base_url, total, resources, search_request
@@ -544,19 +568,18 @@ class AsyncScimHandler:
             self.service.route(request, Operation.bulk)
             plan = self.service.read_bulk(request.body, request.header("Content-Type"))
             for step in plan:
-                result, resource = await self.run_bulk_step(
-                    request.base_url, plan, step
-                )
+                result, resource = await self.run_bulk_step(request, plan, step)
                 plan.record(step, result, resource)
             return self.service.bulk_response(plan)
 
     async def run_bulk_step(
-        self, base_url: str, plan: BulkPlan, step: BulkStep
+        self, request: ScimRequest, plan: BulkPlan, step: BulkStep
     ) -> tuple[dict[str, Any], Resource[Any] | None]:
         """Apply one step of a bulk request.
 
-        An operation that failed its validation keeps its error, once its
-        references are resolved to locate it.
+        The step resolves the references of the operation, locates it and
+        authorizes it. An operation that failed its validation then keeps its
+        error.
 
         :return: The outcome of the step, and the resource it created or updated.
         """
@@ -565,8 +588,9 @@ class AsyncScimHandler:
         try:
             operation = plan.resolve(step)
             resource_type = self.service.locate_bulk_operation(
-                base_url, operation, outcome
+                request.base_url, operation, outcome
             )
+            self.service.authorize_bulk_operation(request, operation, resource_type)
             failure = self.service.bulk_validation_failure(operation, outcome)
             if failure is not None:
                 return failure, None
@@ -577,7 +601,7 @@ class AsyncScimHandler:
         except Exception as exception:
             return self.service.bulk_failure(outcome, exception), None
         return self.service.bulk_success(
-            base_url, operation, outcome, resource
+            request.base_url, operation, outcome, resource
         ), resource
 
     async def apply_bulk_operation(

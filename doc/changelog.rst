@@ -1,6 +1,20 @@
 Changelog
 =========
 
+[0.6.0] - Unreleased
+--------------------
+
+Added
+^^^^^
+- :meth:`~scim2_server.service.ScimService.authorize` accepts or refuses each operation of a
+  client, bulk operations included.
+
+Changed
+^^^^^^^
+- :meth:`~scim2_server.handler.ScimHandler.run_bulk_step` takes the bulk request instead of its
+  base URL.
+- The storage contract accepts a version that only changes with the content of the resource.
+
 [0.5.0] - 2026-10-05
 --------------------
 

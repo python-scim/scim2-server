@@ -258,12 +258,13 @@ class ScimStorageContract:
         """An update raises a 412 and stores nothing when the stored version changed."""
         (user,) = self.create_users(storage, user_type, user_model, "bjensen")
         outdated = user.meta.version
+        user.display_name = "Babs"
         storage.update(user_type, user)
         user.display_name = "Barbara"
 
         with pytest.raises(PreconditionFailedException):
             storage.update(user_type, user, expected_version=outdated)
-        assert storage.get(user_type, user.id).display_name is None
+        assert storage.get(user_type, user.id).display_name == "Babs"
 
     def test_delete_removes_the_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any
@@ -300,6 +301,7 @@ class ScimStorageContract:
         """A deletion raises a 412 and keeps the resource when the stored version changed."""
         (user,) = self.create_users(storage, user_type, user_model, "bjensen")
         outdated = user.meta.version
+        user.display_name = "Babs"
         storage.update(user_type, user)
 
         with pytest.raises(PreconditionFailedException):

@@ -27,6 +27,8 @@ class ScimStorage(ABC):
     - It fills ``id``, ``meta.resourceType``, ``meta.created``,
       ``meta.lastModified`` and ``meta.version``. It leaves ``meta.location``
       to the server, which knows the URLs.
+    - The version changes whenever the resource changes. An update that
+      changes nothing may keep it.
     - A resource that does not exist raises
       :class:`~scim2_models.NotFoundException`.
     - A value already taken by an attribute whose uniqueness is ``server`` or
