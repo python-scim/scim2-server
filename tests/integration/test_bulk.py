@@ -196,31 +196,61 @@ class TestBulkOperationErrors:
         assert result["status"] == "404"
         assert result["location"] == "https://scim.example.com/v2/Users/unknown"
 
-    def test_unknown_endpoint(self, wsgi):
-        """An operation on an endpoint that serves no resource type answers 400 invalidPath, with the URL of its path."""
-        (result,) = bulk(wsgi, [{"method": "DELETE", "path": "/Unknown/x"}]).json()[
-            "Operations"
-        ]
-        assert result["status"] == "400"
-        assert result["response"]["scimType"] == "invalidPath"
-        assert result["location"] == "https://scim.example.com/v2/Unknown/x"
+    @pytest.mark.parametrize(
+        ("method", "path", "status"),
+        [
+            ("DELETE", "/Unknown/x", "404"),
+            ("DELETE", "/Users/a/b", "404"),
+            ("DELETE", "/Users", "405"),
+            ("PUT", "/Users", "405"),
+            ("DELETE", "/Schemas/x", "405"),
+            ("DELETE", "/ServiceProviderConfig", "405"),
+        ],
+    )
+    def test_routing_errors(self, wsgi, method, path, status):
+        """RFC 7644 §3.7.3: an operation fails with the status of the same single request, and the URL of its path."""
+        operation = {"method": method, "path": path, "data": {"userName": "x"}}
+        (result,) = bulk(wsgi, [operation]).json()["Operations"]
+        assert result["status"] == status
+        assert result["response"]["status"] == status
+        assert result["location"] == f"https://scim.example.com/v2{path}"
 
     def test_post_to_a_resource(self, wsgi):
-        """RFC 7644 §3.7: a POST targets a resource type endpoint, and fails without a location otherwise."""
+        """RFC 7644 §3.7.3: a POST on a resource answers 405, as a single request, and fails without a location."""
         operation = {"method": "POST", "path": "/Users/x", "bulkId": "a", "data": {}}
+        (result,) = bulk(wsgi, [operation]).json()["Operations"]
+        assert result["status"] == "405"
+        assert "location" not in result
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("POST", "/Users/.search"),
+            ("POST", "/.search"),
+            ("POST", "/Bulk"),
+            ("POST", "/Me"),
+            ("PUT", "/Me"),
+            ("DELETE", "/Me"),
+        ],
+    )
+    def test_path_that_is_not_a_resource(self, wsgi, method, path):
+        """RFC 7644 §3.7: a path targets a resource type endpoint or a resource, not a search, a bulk or /Me."""
+        operation = {"method": method, "path": path, "bulkId": "a", "data": {}}
         (result,) = bulk(wsgi, [operation]).json()["Operations"]
         assert result["status"] == "400"
         assert result["response"]["scimType"] == "invalidValue"
-        assert "location" not in result
 
-    def test_delete_an_endpoint(self, wsgi):
-        """RFC 7644 §3.7: a DELETE targets a resource, and fails with the URL of its path otherwise."""
-        (result,) = bulk(wsgi, [{"method": "DELETE", "path": "/Users"}]).json()[
-            "Operations"
-        ]
-        assert result["status"] == "400"
-        assert result["response"]["scimType"] == "invalidValue"
-        assert result["location"] == "https://scim.example.com/v2/Users"
+    def test_routing_comes_before_the_references(self, wsgi):
+        """An operation on an unknown endpoint answers 404, even when its path references no creation."""
+        operation = {"method": "DELETE", "path": "/Unknown/bulkId:missing"}
+        (result,) = bulk(wsgi, [operation]).json()["Operations"]
+        assert result["status"] == "404"
+
+    def test_routing_comes_before_the_validation(self, wsgi):
+        """An operation on an unknown endpoint answers 404, even when its data is invalid."""
+        operation = {"method": "PUT", "path": "/Unknown/x", "data": {"userName": 42}}
+        (result,) = bulk(wsgi, [operation]).json()["Operations"]
+        assert result["status"] == "404"
 
     def test_path_is_required(self, wsgi):
         """RFC 7644 §3.7: the path of an operation is required. The operation fails with the root URL as location."""

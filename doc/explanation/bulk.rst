@@ -54,7 +54,7 @@ the operation, so :meth:`~scim2_server.service.ScimService.authorize` receives t
 resource the operation acts on. The server then authorizes the operation, before it reports the
 validation errors of the operation. A refused client gets a 403, even when its data is invalid,
 and learns nothing about the expected data. An operation on an endpoint that serves no resource
-type fails with a 400, without authorization.
+type fails with a 404, without authorization.
 
 Failures
 --------
@@ -63,6 +63,13 @@ A failed operation does not fail the request. Its result carries a status and an
 next operations run. :attr:`~scim2_models.BulkRequest.fail_on_errors` caps the number of failures the client accepts. Once it
 is reached, the remaining operations do not run, and the response lists the results of the
 operations that ran.
+
+Per :rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>`, a failed operation has the status the same
+request would get on its own. The server routes the path of each operation as the path of a
+single request, before it resolves the references. ``DELETE /Unknown/x`` fails with a 404, and
+``DELETE /Users`` with a 405, as on their own. A path must target a resource type endpoint or a
+resource (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`). An operation on a search, on ``/Bulk`` or on
+``/Me`` fails with a 400.
 
 Per :rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>`, every result has a location, except the result
 of a failed POST. A failed operation keeps the location of its resource. When the operation

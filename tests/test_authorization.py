@@ -333,10 +333,10 @@ def test_a_refused_bulk_operation_with_invalid_data_answers_403(handler):
 
 
 def test_a_bulk_operation_on_an_unknown_endpoint_is_not_authorized(handler):
-    """An operation on an endpoint that serves no resource type keeps its 400."""
+    """An operation on an endpoint that serves no resource type answers 404, without authorization."""
     (result,) = bulk(handler, [{"method": "DELETE", "path": "/Unknown/x"}], {})
 
-    assert result["status"] == "400"
+    assert result["status"] == "404"
     assert handler.service.calls == []
 
 

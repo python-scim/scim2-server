@@ -245,18 +245,19 @@ class ScimHandler:
     ) -> tuple[dict[str, Any], Resource[Any] | None]:
         """Apply one step of a bulk request.
 
-        The step resolves the references of the operation, locates it and
-        authorizes it. An operation that failed its validation then keeps its
-        error.
+        The step routes the path of the operation, resolves its references,
+        locates it and authorizes it, so that it fails as a single request
+        would. An operation that failed its validation then keeps its error.
 
         :return: The outcome of the step, and the resource it created or updated.
         """
         operation = plan.operation(step)
         outcome = self.service.bulk_outcome(request.base_url, operation)
         try:
+            resource_type = self.service.route_bulk_operation(operation)
             operation = plan.resolve(step)
-            resource_type = self.service.locate_bulk_operation(
-                request.base_url, operation, outcome
+            self.service.locate_bulk_operation(
+                request.base_url, resource_type, operation, outcome
             )
             self.service.authorize_bulk_operation(request, operation, resource_type)
             failure = self.service.bulk_validation_failure(operation, outcome)
@@ -280,12 +281,12 @@ class ScimHandler:
         The data of the operation is already validated, in the context of the
         request the operation stands for.
         """
-        resource_id = self.service.check_bulk_target(operation)
-        if resource_id is None:
+        if operation.method == BulkOperation.Method.post:
             return self.storage.create(
                 resource_type, cast(Resource[Any], operation.data)
             )
 
+        resource_id = cast(str, operation.resource_id)
         conditions = Conditions(if_match=operation.version)
         match operation.method:
             case BulkOperation.Method.put:
@@ -577,18 +578,19 @@ class AsyncScimHandler:
     ) -> tuple[dict[str, Any], Resource[Any] | None]:
         """Apply one step of a bulk request.
 
-        The step resolves the references of the operation, locates it and
-        authorizes it. An operation that failed its validation then keeps its
-        error.
+        The step routes the path of the operation, resolves its references,
+        locates it and authorizes it, so that it fails as a single request
+        would. An operation that failed its validation then keeps its error.
 
         :return: The outcome of the step, and the resource it created or updated.
         """
         operation = plan.operation(step)
         outcome = self.service.bulk_outcome(request.base_url, operation)
         try:
+            resource_type = self.service.route_bulk_operation(operation)
             operation = plan.resolve(step)
-            resource_type = self.service.locate_bulk_operation(
-                request.base_url, operation, outcome
+            self.service.locate_bulk_operation(
+                request.base_url, resource_type, operation, outcome
             )
             self.service.authorize_bulk_operation(request, operation, resource_type)
             failure = self.service.bulk_validation_failure(operation, outcome)
@@ -612,12 +614,12 @@ class AsyncScimHandler:
         The data of the operation is already validated, in the context of the
         request the operation stands for.
         """
-        resource_id = self.service.check_bulk_target(operation)
-        if resource_id is None:
+        if operation.method == BulkOperation.Method.post:
             return await self.storage.create(
                 resource_type, cast(Resource[Any], operation.data)
             )
 
+        resource_id = cast(str, operation.resource_id)
         conditions = Conditions(if_match=operation.version)
         match operation.method:
             case BulkOperation.Method.put:

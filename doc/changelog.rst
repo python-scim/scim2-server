@@ -7,6 +7,9 @@ Changelog
 Changed
 ^^^^^^^
 - :meth:`~scim2_server.service.ScimService.bulk_outcome` takes the base URL.
+- :meth:`~scim2_server.service.ScimService.locate_bulk_operation` takes the resource type, and
+  :meth:`~scim2_server.service.ScimService.route_bulk_operation` returns it.
+  ``ScimService.check_bulk_target`` is removed.
 - :meth:`~scim2_server.service.ScimService.max_body_size` returns 0 instead of raising an
   exception, for a request that fails whatever its body, such as on an unknown path.
 
@@ -14,6 +17,8 @@ Fixed
 ^^^^^
 - Every failed bulk operation has a location, except a failed POST, which has none. scim2-client
   no longer rejects these bulk responses.
+- A bulk operation fails with the status of the same request on its own, such as 404 for an
+  unknown endpoint or 405 for ``DELETE /Users``, instead of 400.
 - A request body without :mdn:`Content-Type` is read as JSON, instead of answering 415.
 - Each response carrying a resource has a :mdn:`Content-Location` header with ``meta.location``.
 - A provider without ``config`` announces PATCH, and no other capability. It announced every

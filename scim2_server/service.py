@@ -315,13 +315,13 @@ class ScimService:
     ) -> None:
         """Authorize a resolved bulk operation with :meth:`authorize`.
 
-        An operation without a known resource type or a valid method keeps its
-        validation error, without authorization.
+        An operation without a valid method or path keeps its validation
+        error, without authorization.
         """
-        if resource_type is None or operation.method is None:
+        if resource_type is None:
             return
         target = Target(
-            BULK_OPERATIONS[operation.method],
+            BULK_OPERATIONS[cast(BulkOperation.Method, operation.method)],
             endpoint=self.endpoint_of(resource_type),
             resource_id=operation.resource_id,
         )
@@ -861,18 +861,46 @@ class ScimService:
             outcome["location"] = f"{base_url.rstrip('/')}/{path}"
         return outcome
 
+    def route_bulk_operation(
+        self, operation: BulkOperation[Resource[Any]]
+    ) -> ResourceType | None:
+        """Return the resource type a bulk operation acts on.
+
+        The path of the operation is routed as the path of a single request,
+        so that the operation fails with the same status
+        (:rfc:`RFC 7644 §3.7.3 <7644#section-3.7.3>`). An operation without a
+        valid method or path keeps its validation error, and has no resource
+        type.
+
+        :raises ~scim2_models.NotFoundException: When no endpoint has the path
+            of the operation, or no resource type is served at it.
+        :raises ~scim2_server.errors.MethodNotAllowedException: When the
+            endpoint does not support the method of the operation.
+        :raises ~scim2_models.InvalidValueException: When the path is not a
+            resource type endpoint or a resource, such as ``/Me`` or a search
+            (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`).
+        """
+        if operation.method is None or operation.path is None:
+            return None
+        target = match(operation.method, operation.path)
+        if target.me or target.operation not in BULK_OPERATIONS.values():
+            raise InvalidValueException(
+                detail="A bulk operation must target a resource type endpoint or a resource"
+            )
+        return self.resource_type_at(cast(str, target.endpoint))
+
     def locate_bulk_operation(
         self,
         base_url: str,
+        resource_type: ResourceType | None,
         operation: BulkOperation[Resource[Any]],
         outcome: dict[str, Any],
-    ) -> ResourceType | None:
-        """Return the resource type a resolved bulk operation targets, and locate its resource.
+    ) -> None:
+        """Locate the resource of a resolved bulk operation.
 
         The location is set before the operation runs, so a failure still
         knows it. A POST only gets a location when it succeeds.
         """
-        resource_type = self.get_resource_type_by_endpoint(operation.endpoint or "")
         if (
             resource_type is not None
             and operation.resource_id
@@ -881,7 +909,6 @@ class ScimService:
             outcome["location"] = self.resource_location(
                 base_url, resource_type, operation.resource_id
             )
-        return resource_type
 
     @staticmethod
     def bulk_validation_failure(
@@ -891,21 +918,6 @@ class ScimService:
         if not isinstance(operation.response, Error):
             return None
         return {**outcome, "status": operation.status, "response": operation.response}
-
-    @staticmethod
-    def check_bulk_target(operation: BulkOperation[Resource[Any]]) -> str | None:
-        """Check that the path of a bulk operation fits its method.
-
-        :return: The identifier of the targeted resource, or :data:`None` for a POST.
-        :raises ~scim2_models.InvalidValueException: When a POST targets a
-            resource, or another method a resource type endpoint.
-        """
-        resource_id = operation.resource_id
-        if (operation.method == BulkOperation.Method.post) == bool(resource_id):
-            raise InvalidValueException(
-                detail="A POST path must target a resource type endpoint, other methods a resource"
-            )
-        return resource_id
 
     def bulk_failure(
         self, outcome: dict[str, Any], exception: Exception
