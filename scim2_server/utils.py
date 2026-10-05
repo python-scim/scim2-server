@@ -38,12 +38,12 @@ def load_scim_resource(json_name: str, type_: type[ResourceT]) -> dict[str, Reso
 
 
 def load_default_schemas() -> dict[str, Schema]:
-    """Load the default schemas from RFC 7643."""
+    """Load the default schemas from :rfc:`RFC 7643 <7643>`."""
     return load_scim_resource("default-schemas.json", Schema)
 
 
 def load_default_resource_types() -> dict[str, ResourceType]:
-    """Load the default resource types from RFC 7643."""
+    """Load the default resource types from :rfc:`RFC 7643 <7643>`."""
     return load_scim_resource("default-resource-types.json", ResourceType)
 
 

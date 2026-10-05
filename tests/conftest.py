@@ -1,3 +1,4 @@
+import asyncio
 import importlib.resources
 import json
 
@@ -5,8 +6,10 @@ import httpx2
 import pytest
 from scim2_models import ScimProvider
 
-from scim2_server.backend import InMemoryBackend
-from scim2_server.provider import SCIMApplication
+from scim2_server.applications.wsgi import WSGIApplication
+from scim2_server.handler import AsyncScimHandler
+from scim2_server.memory import AsyncInMemoryStorage
+from scim2_server.memory import InMemoryStorage
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
@@ -23,8 +26,8 @@ def user_type(scim_provider):
 
 
 @pytest.fixture
-def backend():
-    return InMemoryBackend()
+def storage():
+    return InMemoryStorage()
 
 
 @pytest.fixture(scope="session")
@@ -43,9 +46,30 @@ def fake_user_data():
     return load_json_resource("fake_user_data.json")
 
 
-@pytest.fixture
-def app(backend, scim_provider):
-    return SCIMApplication(backend, scim_provider)
+class BlockingHandler:
+    """Serve the requests of a SCIM application with an AsyncScimHandler, one coroutine at a time."""
+
+    def __init__(self, handler):
+        self.handler = handler
+
+    def __getattr__(self, name):
+        method = getattr(self.handler, name)
+
+        def call(*args, **kwargs):
+            return asyncio.run(method(*args, **kwargs))
+
+        return call
+
+
+@pytest.fixture(params=["sync", "async"])
+def app(request, storage, scim_provider):
+    """Return a SCIM application, served by the synchronous handler, then by the asynchronous one."""
+    app = WSGIApplication(storage, scim_provider)
+    if request.param == "async":
+        app.handler = BlockingHandler(
+            AsyncScimHandler(app.service, AsyncInMemoryStorage(storage))
+        )
+    return app
 
 
 @pytest.fixture
@@ -54,12 +78,12 @@ def wsgi(app):
     client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
     client.__enter__()
     yield client
-    app.backend.resources = []
+    app.storage.resources = []
     client.__exit__(None, None, None)
 
 
 @pytest.fixture
-def wsgi_with(backend, scim_provider):
+def wsgi_with(storage, scim_provider):
     """Build clients of applications serving the default resources under another configuration or policy."""
     clients = []
 
@@ -70,7 +94,7 @@ def wsgi_with(backend, scim_provider):
             config=config or scim_provider.config,
             policy=policy,
         )
-        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         client = httpx2.Client(transport=transport, base_url="https://scim.example.com")
         clients.append(client)
         return client

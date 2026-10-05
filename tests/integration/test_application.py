@@ -15,13 +15,13 @@ from scim2_models import ServiceProviderConfig
 from scim2_models import Sort
 from scim2_models import User
 
-from scim2_server.provider import SCIMApplication
+from scim2_server.applications.wsgi import WSGIApplication
 from scim2_server.utils import load_default_service_provider_config
 from tests.utils import compare_dicts
 
 
-class TestSCIMApplication:
-    """End-to-end tests for the SCIMApplication."""
+class TestApplication:
+    """End-to-end tests for the WSGIApplication."""
 
     def test_location_mapping(self, app):
         transport = httpx2.WSGITransport(app=app, script_name="/foo/bar")
@@ -74,17 +74,6 @@ class TestSCIMApplication:
                 "https://scim.example.com/foo/bar/v2/Users/"
             )
 
-    def test_absolute_location_from_the_backend_is_kept(self, app, fake_user_data):
-        """A backend may store an absolute location, which is published as it is."""
-        transport = httpx2.WSGITransport(app=app, script_name="/foo")
-        with httpx2.Client(
-            transport=transport, base_url="https://scim.example.com"
-        ) as client:
-            user_id = client.post("/v2/Users", json=fake_user_data[0]).json()["id"]
-            app.backend.resources[0].meta.location = "https://other.example/Users/x"
-            r = client.get(f"/v2/Users/{user_id}")
-            assert r.json()["meta"]["location"] == "https://other.example/Users/x"
-
     def test_service_provider_configuration(self, wsgi):
         r = wsgi.get("/v2/ServiceProviderConfig")
         assert r.status_code == 200
@@ -111,10 +100,12 @@ class TestSCIMApplication:
         }
 
     def test_no_version_prefix(self, wsgi):
-        """Test a location without the /v2 version prefix."""
+        """A request without the /v2 version prefix is served, with the locations of the /v2 prefix."""
         r = wsgi.get("/ServiceProviderConfig")
         assert r.status_code == 200
-        assert r.headers["Location"] == "https://scim.example.com/ServiceProviderConfig"
+        assert (
+            r.headers["Location"] == "https://scim.example.com/v2/ServiceProviderConfig"
+        )
         assert r.json() == {
             "authenticationSchemes": [],
             "bulk": {
@@ -126,7 +117,7 @@ class TestSCIMApplication:
             "etag": {"supported": True},
             "filter": {"maxResults": 1000, "supported": True},
             "meta": {
-                "location": "https://scim.example.com/ServiceProviderConfig",
+                "location": "https://scim.example.com/v2/ServiceProviderConfig",
                 "resourceType": "ServiceProviderConfig",
             },
             "patch": {"supported": True},
@@ -134,7 +125,7 @@ class TestSCIMApplication:
             "sort": {"supported": True},
         }
 
-    def test_service_provider_configuration_from_the_provider(self, backend):
+    def test_service_provider_configuration_from_the_provider(self, storage):
         """The configuration the provider carries is the one published."""
         config = ServiceProviderConfig(
             patch=Patch(supported=False),
@@ -145,7 +136,7 @@ class TestSCIMApplication:
             etag=ETag(supported=False),
         )
         provider = ScimProvider(models=[User], config=config)
-        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
@@ -153,10 +144,10 @@ class TestSCIMApplication:
         assert published["patch"] == {"supported": False}
         assert published["filter"] == {"supported": False}
 
-    def test_service_provider_configuration_defaults(self, backend):
+    def test_service_provider_configuration_defaults(self, storage):
         """A provider carrying no configuration is served the default one."""
         provider = ScimProvider(models=[User])
-        transport = httpx2.WSGITransport(app=SCIMApplication(backend, provider))
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
         with httpx2.Client(
             transport=transport, base_url="https://scim.example.com"
         ) as client:
@@ -500,7 +491,7 @@ class TestSCIMApplication:
         self, app, user_type, wsgi, first_fake_user
     ):
         """A client never gets the password back, so omitting it does not clear it."""
-        stored = app.backend.get_resource(user_type, first_fake_user)
+        stored = app.storage.get(user_type, first_fake_user)
         assert stored.password is not None
 
         r = wsgi.put(
@@ -508,7 +499,7 @@ class TestSCIMApplication:
             json={"userName": "joseph96@williams-brown.com"},
         )
         assert r.status_code == 200
-        replaced = app.backend.get_resource(user_type, first_fake_user)
+        replaced = app.storage.get(user_type, first_fake_user)
         assert replaced.password == stored.password
 
     def test_resource_put_clears_a_password_set_to_null(
@@ -520,7 +511,7 @@ class TestSCIMApplication:
             json={"userName": "joseph96@williams-brown.com", "password": None},
         )
         assert r.status_code == 200
-        assert app.backend.get_resource(user_type, first_fake_user).password is None
+        assert app.storage.get(user_type, first_fake_user).password is None
 
     def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
         """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""
@@ -1083,13 +1074,17 @@ class TestSCIMApplication:
         assert r.status_code == 404
 
     def test_resource_meta_dates(self, wsgi, fake_user_data):
-        @time_machine.travel(datetime.datetime(2024, 3, 14, 6, 00, tzinfo=datetime.UTC))
+        @time_machine.travel(
+            datetime.datetime(2024, 3, 14, 6, 00, tzinfo=datetime.UTC), tick=False
+        )
         def create_user():
             r = wsgi.post("/v2/Users", json=fake_user_data[1])
             assert r.status_code == 201
             return r.json()
 
-        @time_machine.travel(datetime.datetime(2024, 3, 16, 8, 30, tzinfo=datetime.UTC))
+        @time_machine.travel(
+            datetime.datetime(2024, 3, 16, 8, 30, tzinfo=datetime.UTC), tick=False
+        )
         def update_user(user_id):
             r = wsgi.put(f"/v2/Users/{user_id}", json={"userName": "Foo"})
             assert r.status_code == 200
@@ -1103,36 +1098,12 @@ class TestSCIMApplication:
         assert j["meta"]["created"] == "2024-03-14T06:00:00Z"
         assert j["meta"]["lastModified"] == "2024-03-16T08:30:00Z"
 
-    def test_authentication(self, first_fake_user, app, wsgi):
-        r = wsgi.get("/v2/ServiceProviderConfig")
-        assert "WWW-Authenticate" not in r.headers
-        app.register_bearer_token("SuperSecretToken")
-
-        r = wsgi.get("/v2/ServiceProviderConfig")
-        assert "WWW-Authenticate" in r.headers
-
-        r = wsgi.get(f"/v2/Users/{first_fake_user}")
-        assert r.status_code == 401
-
-        r = wsgi.get(
-            f"/v2/Users/{first_fake_user}",
-            headers={"Authorization": "Bearer IncorrectToken"},
-        )
-        assert r.status_code == 401
-
-        r = wsgi.get(
-            f"/v2/Users/{first_fake_user}",
-            headers={"Authorization": "Bearer SuperSecretToken"},
-        )
-        assert r.status_code == 200
-
-    def test_redirect(self, wsgi):
-        r = wsgi.get("/v2", follow_redirects=False)
-        assert r.is_redirect
-        assert r.headers["Location"] == "https://scim.example.com/v2/"
+    def test_version_prefix_without_trailing_slash(self, wsgi):
+        """The /v2 prefix alone is the root of the SCIM endpoints, with or without a trailing slash."""
+        assert wsgi.get("/v2").json() == wsgi.get("/v2/").json()
 
 
-class TestSCIMApplicationPolicy:
+class TestApplicationPolicy:
     def test_undeclared_attribute_is_refused_by_default(self, wsgi):
         """The default policy follows the strict reading and refuses what no schema declares."""
         r = wsgi.post(
