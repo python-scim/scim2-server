@@ -21,6 +21,20 @@ The plan does no input or output: the synchronous and the asynchronous handlers 
 plan with the same loop. It walks the references without recursion, so a long chain of
 references cannot exhaust the Python stack.
 
+The references
+--------------
+
+The storage creates the resource of a POST, and gives its ``id``. The server then replaces each
+``bulkId:`` reference with this ``id``, before it passes the next operations to the storage:
+
+- in the path of an operation, such as ``/Groups/bulkId:qwerty``;
+- in every value of the data of an operation, at any depth, such as the ``value`` of a group
+  member.
+
+A reference is a whole value, such as ``bulkId:qwerty``. The storage never receives it. When the
+POST of a reference failed, or when no POST of the request has its ``bulkId``, the operation fails
+with a 409.
+
 Circular references
 -------------------
 
