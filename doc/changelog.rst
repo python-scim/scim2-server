@@ -11,6 +11,11 @@ Changed
 - The default service provider configuration declares no authentication scheme. Declare the
   schemes of the application in the ``config`` of the provider.
 
+Fixed
+^^^^^
+- The in-memory storage compares unique values as filters do. A ``userName`` written with a
+  combining accent clashes with the same ``userName`` written with a precomposed one.
+
 [0.6.2] - 2026-10-06
 --------------------
 

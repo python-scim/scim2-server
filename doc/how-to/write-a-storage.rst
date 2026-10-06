@@ -15,7 +15,7 @@ the resources in a SQLite database. The synchronous storage uses :mod:`sqlite3`,
 and the asynchronous one uses `aiosqlite <https://aiosqlite.omnilib.dev>`_. A row holds a resource:
 its resource type, its identifier, the ``userName`` of a user, the other attributes as JSON, its
 dates and its version. A ``UNIQUE`` constraint refuses two users with the same ``userName``,
-whatever its case:
+whatever the case of its ASCII letters:
 
 .. literalinclude:: ../_examples/sqlite_storage.py
    :language: python
@@ -128,7 +128,10 @@ and start its version at 1:
 Refuse a duplicate value
 ------------------------
 
-In the default user resource, the ``userName`` of a user is unique, whatever its case. On a creation and on an update, raise
+In the default user resource, the ``userName`` of a user is unique, whatever its case. Compare the
+values in the form :meth:`AttributeBinding.comparable <scim2_models.AttributeBinding.comparable>`
+returns, as the filters do. The example relies on ``COLLATE NOCASE``, which only ignores the case
+of ASCII letters: ``Élise`` and ``élise`` remain two users. On a creation and on an update, raise
 :class:`~scim2_models.UniquenessException` when another user already has the value. The ``UNIQUE`` constraint of the table refuses such a write, even when two
 requests arrive at the same time. The example commits each write, and turns the refusal into the
 exception:

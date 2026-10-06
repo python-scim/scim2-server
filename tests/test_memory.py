@@ -153,6 +153,15 @@ def test_uniqueness_follows_the_case_exactness_of_each_attribute():
         create("XYZ", "def")
 
 
+def test_uniqueness_compares_the_unicode_forms_of_a_value(user_type, scim_provider):
+    """A userName written with a combining accent clashes with the same userName written with a precomposed one."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="Jos\u00e9"))
+    with pytest.raises(UniquenessException):
+        storage.create(user_type, User(user_name="JOSE\u0301"))
+
+
 def test_only_the_user_name_of_the_default_user_is_unique(user_type, scim_provider):
     """Two users sharing every value but their userName do not conflict."""
     storage = InMemoryStorage()

@@ -207,9 +207,7 @@ class InMemoryStorage(ScimStorage):
         value = parametrize(Path, type(resource))(attribute.urn).get(
             resource, strict=False
         )
-        if isinstance(value, str) and not attribute.case_exact:
-            return value.casefold()
-        return value
+        return attribute.comparable(value)
 
 
 class AsyncInMemoryStorage(AsyncScimStorage):
