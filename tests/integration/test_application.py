@@ -978,10 +978,10 @@ class TestApplication:
         assert r.status_code == 200
         assert [u["userName"] for u in r.json()["Resources"]] == ["bob"]
 
-    def test_search_folds_the_case_of_a_case_insensitive_string(self, wsgi):
-        """Unicode case folding makes "STRASSE" match "Straße"."""
-        wsgi.post("/v2/Users", json={"userName": "alice", "title": "Straße"})
-        r = wsgi.get("/v2/Users", params={"filter": 'title eq "STRASSE"'})
+    def test_search_ignores_the_case_of_a_case_insensitive_string(self, wsgi):
+        """The case of non-ASCII letters is ignored too: "ÉBÉNISTE" matches "Ébéniste"."""
+        wsgi.post("/v2/Users", json={"userName": "alice", "title": "Ébéniste"})
+        r = wsgi.get("/v2/Users", params={"filter": 'title eq "ÉBÉNISTE"'})
         assert [u["userName"] for u in r.json()["Resources"]] == ["alice"]
 
     def test_search_compares_a_password_with_its_case(self, wsgi):

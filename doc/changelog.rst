@@ -6,8 +6,11 @@ Changelog
 
 Changed
 ^^^^^^^
-- Requires scim2-models 0.11. Responses leave out empty values, and list in ``schemas`` only the
+- Requires scim2-models 0.12. Responses leave out empty values, and list in ``schemas`` only the
   extensions they hold. A bulk request without operations answers 400.
+- Filters, sorting and uniqueness checks compare strings as the ``comparison_key`` of the
+  :class:`~scim2_models.ScimPolicy` of the provider says. By default, the case of strings is
+  mapped to lowercase rather than folded: ``Straße`` no longer matches ``STRASSE``.
 - The default service provider configuration declares no authentication scheme. Declare the
   schemes of the application in the ``config`` of the provider.
 

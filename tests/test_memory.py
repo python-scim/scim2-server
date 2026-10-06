@@ -189,13 +189,13 @@ def test_a_missing_unique_value_does_not_clash():
         storage.create(badge_type, Badge(code="x"))
 
 
-def test_unique_values_are_compared_with_unicode_case_folding(user_type, scim_provider):
-    """Unicode case folding makes "Straße" and "STRASSE" the same value."""
+def test_unique_values_ignore_the_case_of_non_ascii_letters(user_type, scim_provider):
+    """The case of non-ASCII letters is ignored: "élise" and "ÉLISE" clash."""
     storage = InMemoryStorage()
     User = scim_provider.model_for(user_type)
-    storage.create(user_type, User(user_name="Straße"))
+    storage.create(user_type, User(user_name="élise"))
     with pytest.raises(UniquenessException):
-        storage.create(user_type, User(user_name="STRASSE"))
+        storage.create(user_type, User(user_name="ÉLISE"))
 
 
 def test_uniqueness_does_not_span_schemas():
