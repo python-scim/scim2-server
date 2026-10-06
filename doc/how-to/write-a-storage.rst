@@ -264,6 +264,40 @@ announces PATCH, and no other capability. Announce the filter, the sort and the 
 several resource types at once raises :class:`~scim2_models.NotImplementedException` when it
 receives more than one.
 
+Compare the strings
+-------------------
+
+The filters, the sorting and the uniqueness checks compare the strings in the form
+:meth:`AttributeBinding.comparable <scim2_models.AttributeBinding.comparable>` returns. The
+:class:`~scim2_models.ScimPolicy` of the provider decides this form with its ``comparison_key``.
+By default, strings are normalized to NFC, and the case of the attributes that are not
+``caseExact`` is ignored. Pass another policy to the provider to compare otherwise. For instance,
+the ``precis_key`` function of :doc:`scim2_models:how-to/compare-values` applies the PRECIS
+rules:
+
+.. code-block:: python
+
+    provider = ScimProvider(
+        models=...,
+        resource_types=...,
+        policy=ScimPolicy(comparison_key=precis_key),
+    )
+
+While the server handles a request, it puts the policy of the provider in the context of the
+request. :meth:`~scim2_models.AttributeBinding.comparable` reads the policy from this context.
+The methods of the storage therefore compare as the policy says, without receiving it. The
+in-memory storage compares this way in its filters, its sorting and its uniqueness checks.
+
+A database compares strings with its own rules. A storage that compares the strings in SQL gets
+other results, unless it stores the form :meth:`~scim2_models.AttributeBinding.comparable`
+returns. Document the differences for the users of the storage.
+
+An asynchronous storage that runs blocking code with
+:meth:`loop.run_in_executor <asyncio.loop.run_in_executor>` runs it outside this context.
+:meth:`~scim2_models.AttributeBinding.comparable` then uses the default policy. Use
+:func:`asyncio.to_thread`, which keeps the context, or pass the policy to
+:meth:`~scim2_models.AttributeBinding.comparable`.
+
 Enclose each operation in a transaction
 ---------------------------------------
 

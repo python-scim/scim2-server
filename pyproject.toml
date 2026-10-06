@@ -36,6 +36,9 @@ dependencies = [
 testing = [
     "pytest>=9.1.1",
 ]
+precis = [
+    "precis-i18n>=1.1.2",
+]
 
 [project.urls]
 repository = "https://github.com/python-scim/scim2-server"
@@ -53,6 +56,7 @@ dev = [
     "time-machine>=2.14.2",
     "tox-uv>=1.16.0",
     "aiosqlite>=0.22.1",
+    "precis-i18n>=1.1.2",
     "mypy>=2.3.1",
     "scim2-client[werkzeug]>=0.11.2",
     "scim2-tester>=0.5.1",

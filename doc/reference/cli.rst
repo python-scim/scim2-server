@@ -86,6 +86,20 @@ Each test of a test suite can then pick a random tenant, and get an empty server
 create tenants, even without a valid bearer token, and every tenant stays in memory until the
 server stops. Serve this option to trusted clients only.
 
+Compare the usernames with PRECIS
+---------------------------------
+
+By default, the server compares the usernames without the PRECIS rules that
+:rfc:`RFC 7644 §5 <7644#section-5>` requires. Pass ``--precis`` to compare the usernames and the
+passwords with the PRECIS profiles of :rfc:`8265`. The server then refuses with ``invalidValue``
+a username that PRECIS does not allow, such as one holding a space. The option needs the
+``precis`` extra:
+
+.. code-block:: console
+
+    $ pip install 'scim2-server[precis]'
+    $ scim2-server --precis
+
 Keep the resources of a run
 ---------------------------
 

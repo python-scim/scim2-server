@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
         "Can be repeated. Without it, the server accepts every request.",
     )
     parser.add_argument(
+        "--precis",
+        action="store_true",
+        help="Compare the usernames and the passwords with the PRECIS profiles of "
+        "RFC 8265, and refuse the values they do not allow. Needs the precis extra.",
+    )
+    parser.add_argument(
         "--hostname",
         default="127.0.0.1",
         metavar="HOST",
@@ -169,7 +175,20 @@ def main() -> None:
             BEARER_TOKEN_SCHEME,
         ]
 
-    provider = ScimProvider.from_discovery(schemas, resource_types, config=config)
+    policy = None
+    if args.precis:
+        try:
+            # Imported on demand, so that the server runs without the precis extra.
+            from scim2_server.testserver.precis import PRECIS_POLICY
+        except ModuleNotFoundError:
+            parser.error(
+                "--precis needs the precis extra: pip install 'scim2-server[precis]'"
+            )
+        policy = PRECIS_POLICY
+
+    provider = ScimProvider.from_discovery(
+        schemas, resource_types, config=config, policy=policy
+    )
 
     storages: dict[str | None, InMemoryStorage] = {}
 

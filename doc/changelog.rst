@@ -4,6 +4,12 @@ Changelog
 [0.7.0] - Unreleased
 --------------------
 
+Added
+^^^^^
+- The ``--precis`` option of the ``scim2-server`` command compares the usernames and the
+  passwords with the PRECIS profiles of :rfc:`8265`, and refuses the values they do not allow.
+  It needs the ``precis`` extra.
+
 Changed
 ^^^^^^^
 - Requires scim2-models 0.12. Responses leave out empty values, and list in ``schemas`` only the
