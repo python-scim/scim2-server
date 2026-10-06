@@ -203,11 +203,16 @@ class InMemoryStorage(ScimStorage):
         """Return the value a resource holds for a unique attribute, in the form it is compared in.
 
         A resource whose schemas do not declare the attribute holds no value.
+        A string the policy cannot compare is equal to no other value, so it
+        is held as missing too.
         """
         value = parametrize(Path, type(resource))(attribute.urn).get(
             resource, strict=False
         )
-        return attribute.comparable(value)
+        try:
+            return attribute.comparable(value)
+        except ValueError:
+            return None
 
 
 class AsyncInMemoryStorage(AsyncScimStorage):

@@ -18,6 +18,8 @@ Fixed
 ^^^^^
 - The in-memory storage compares unique values as filters do. A ``userName`` written with a
   combining accent clashes with the same ``userName`` written with a precomposed one.
+- A stored value that the policy cannot compare no longer fails the next writes of the in-memory
+  storage with a 500. It clashes with no other value.
 
 [0.6.2] - 2026-10-06
 --------------------

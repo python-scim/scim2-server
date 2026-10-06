@@ -10,11 +10,13 @@ from scim2_models import Filter
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
+from scim2_models import ScimPolicy
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import Sort
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
+from scim2_models import default_comparison_key
 
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
@@ -196,6 +198,25 @@ def test_unique_values_ignore_the_case_of_non_ascii_letters(user_type, scim_prov
     storage.create(user_type, User(user_name="élise"))
     with pytest.raises(UniquenessException):
         storage.create(user_type, User(user_name="ÉLISE"))
+
+
+def refuse_exclamation_marks(binding, value):
+    if "!" in value:
+        raise ValueError("exclamation mark")
+    return default_comparison_key(binding, value)
+
+
+def test_a_value_the_policy_cannot_compare_never_clashes(user_type, scim_provider):
+    """A stored value the policy refuses is equal to no other value, and does not fail the next writes."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="bjensen!"))
+
+    with ScimPolicy(comparison_key=refuse_exclamation_marks):
+        storage.create(user_type, User(user_name="jsmith"))
+        storage.create(user_type, User(user_name="bjensen!"))
+
+    assert len(storage.resources) == 3
 
 
 def test_uniqueness_does_not_span_schemas():
