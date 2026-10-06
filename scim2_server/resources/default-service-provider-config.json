@@ -22,6 +22,5 @@
     },
     "etag": {
         "supported": true
-    },
-    "authenticationSchemes": []
+    }
 }

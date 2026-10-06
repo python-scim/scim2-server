@@ -122,7 +122,6 @@ def patch_only_config() -> ServiceProviderConfig:
         change_password=ChangePassword(supported=False),
         sort=Sort(supported=False),
         etag=ETag(supported=False),
-        authentication_schemes=[],
     )
 
 

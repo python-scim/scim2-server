@@ -214,8 +214,7 @@ In another terminal, read the configuration of the service:
               },
               "etag": {
                   "supported": true
-              },
-              "authenticationSchemes": []
+              }
           }
 
    .. tab-item:: scim2-cli
@@ -253,8 +252,7 @@ In another terminal, read the configuration of the service:
               },
               "etag": {
                   "supported": true
-              },
-              "authenticationSchemes": []
+              }
           }
 
 :doc:`how-to/integrate-a-web-framework` serves SCIM from the web framework of an application,

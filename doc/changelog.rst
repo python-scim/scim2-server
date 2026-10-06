@@ -8,6 +8,8 @@ Changed
 ^^^^^^^
 - Requires scim2-models 0.11. Responses leave out empty values, and list in ``schemas`` only the
   extensions they hold. A bulk request without operations answers 400.
+- The default service provider configuration declares no authentication scheme. Declare the
+  schemes of the application in the ``config`` of the provider.
 
 [0.6.2] - 2026-10-06
 --------------------
