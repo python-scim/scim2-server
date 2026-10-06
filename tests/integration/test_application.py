@@ -81,7 +81,6 @@ class TestApplication:
             r.headers["Location"] == "https://scim.example.com/v2/ServiceProviderConfig"
         )
         assert r.json() == {
-            "authenticationSchemes": [],
             "bulk": {
                 "maxOperations": 1000,
                 "maxPayloadSize": 1048576,
@@ -107,7 +106,6 @@ class TestApplication:
             r.headers["Location"] == "https://scim.example.com/v2/ServiceProviderConfig"
         )
         assert r.json() == {
-            "authenticationSchemes": [],
             "bulk": {
                 "maxOperations": 1000,
                 "maxPayloadSize": 1048576,
@@ -317,10 +315,7 @@ class TestApplication:
         r = wsgi.get(f"/v2/Users/{first_fake_user}", params={"attributes": "userName"})
         assert r.status_code == 200
         assert r.json() == {
-            "schemas": [
-                "urn:ietf:params:scim:schemas:core:2.0:User",
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-            ],
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "id": first_fake_user,
             "userName": "joseph96@williams-brown.com",
         }
@@ -654,10 +649,7 @@ class TestApplication:
         )
         assert r.status_code == 200
         assert r.json() == {
-            "schemas": [
-                "urn:ietf:params:scim:schemas:core:2.0:User",
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-            ],
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "id": first_fake_user,
             "nickName": "Larr",
         }
@@ -692,10 +684,7 @@ class TestApplication:
         )
         assert r.status_code == 200
         assert r.json() == {
-            "schemas": [
-                "urn:ietf:params:scim:schemas:core:2.0:User",
-                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-            ],
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "id": first_fake_user,
         }
 

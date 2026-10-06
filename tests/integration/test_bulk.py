@@ -382,12 +382,6 @@ class TestBulkRequest:
         r = bulk(client, [create_user("alice")])
         assert r.status_code == 501
 
-    def test_empty(self, wsgi):
-        """A job without operations answers an empty list of results."""
-        r = bulk(wsgi, [])
-        assert r.status_code == 200
-        assert r.json()["Operations"] == []
-
     def test_operations_key_is_case_insensitive(self, wsgi):
         """The attribute names of the envelope are case insensitive."""
         r = wsgi.post(
@@ -401,16 +395,22 @@ class TestBulkRequest:
         [
             {"schemas": [BULK_REQUEST]},
             {"schemas": [BULK_REQUEST], "Operations": "x"},
+            {"schemas": [BULK_REQUEST], "Operations": []},
             {
                 "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-                "Operations": [],
+                "Operations": [create_user("x")],
             },
-            {"schemas": [BULK_REQUEST], "failOnErrors": "x", "Operations": []},
+            {
+                "schemas": [BULK_REQUEST],
+                "failOnErrors": "x",
+                "Operations": [create_user("x")],
+            },
             [],
         ],
         ids=[
             "missing-operations",
             "operations-not-a-list",
+            "empty-operations",
             "wrong-schema",
             "invalid-fail-on-errors",
             "not-an-object",

@@ -36,7 +36,7 @@ class TestSCIMApplicationBasic:
         assert j["meta"]["location"] == f"https://scim.example.com/v2/Users/{j['id']}"
         j.pop("meta")
         j.pop("id")
-        assert j == payload
+        assert j == {**payload, "schemas": [USER_SCHEMA]}
 
     def test_unique_constraints(self, wsgi):
         payload = {
