@@ -26,7 +26,9 @@ class ScimStorage(ABC):
       stored resource, and the resources it receives are not changed either.
     - It fills ``id``, ``meta.resourceType``, ``meta.created``,
       ``meta.lastModified`` and ``meta.version``. It leaves ``meta.location``
-      to the server, which knows the URLs.
+      to the server, which knows the URLs. For the same reason, a reference
+      to another resource, such as ``members.$ref``, can be relative to the
+      SCIM root, such as ``Users/2819c223``. The server returns its URL.
     - The version changes whenever the resource changes. An update that
       changes nothing may keep it.
     - A resource that does not exist raises

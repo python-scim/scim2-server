@@ -5,6 +5,7 @@ from typing import Any
 from typing import TypeVar
 from typing import Union
 from typing import cast
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 from pydantic_core import from_json
@@ -28,7 +29,9 @@ from scim2_models import NotFoundException
 from scim2_models import NotImplementedException
 from scim2_models import Patch
 from scim2_models import PatchOp
+from scim2_models import Path
 from scim2_models import PayloadTooLargeException
+from scim2_models import Reference
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ResponseParameters
@@ -512,11 +515,28 @@ class ScimService:
             f"{base_url.rstrip('/')}/{resource_type.endpoint.strip('/')}/{resource_id}"
         )
 
+    def reference_location(self, base_url: str, reference: str) -> str:
+        """Return the URL of a reference to a resource.
+
+        A reference relative to the SCIM root, such as ``Users/2819c223``,
+        becomes the location of the resource
+        (:rfc:`RFC 7643 §2.3.7 <7643#section-2.3.7>`). Absolute references
+        are kept.
+        """
+        if urlsplit(reference).scheme or reference.startswith("/"):
+            return reference
+        endpoint, _, resource_id = reference.rpartition("/")
+        resource_type = self.get_resource_type_by_endpoint(endpoint)
+        if resource_type is None or not resource_id:
+            return f"{base_url.rstrip('/')}/{reference}"
+        return self.resource_location(base_url, resource_type, resource_id)
+
     def publish(self, base_url: str, resource: Resource[Any]) -> Resource[Any]:
         """Return a copy of a stored resource in the form sent to the client.
 
-        Its location is set, and its version is left out when the service does
-        not support ETags.
+        Its location is set, its references to other resources become URLs
+        with :meth:`reference_location`, and its version is left out when the
+        service does not support ETags.
         """
         assert resource.meta is not None
         assert resource.id is not None
@@ -527,9 +547,41 @@ class ScimService:
         }
         if not self.etag_supported:
             update["version"] = None
-        return resource.model_copy(
-            update={"meta": resource.meta.model_copy(update=update)}
-        )
+        published = resource.model_copy(deep=True)
+        published.meta = resource.meta.model_copy(update=update)
+        self._publish_references(base_url, published)
+        return published
+
+    def _publish_references(self, base_url: str, resource: Resource[Any]) -> None:
+        """Replace in place the references of a resource to other resources by their URLs."""
+
+        def locate(reference: Any) -> Any:
+            if isinstance(reference, list):
+                return [locate(item) for item in reference]
+            if reference is None:
+                return None
+            return self.reference_location(base_url, reference)
+
+        for path in parametrize(Path, type(resource)).iter_paths(
+            target_type=[Reference]
+        ):
+            binding = path.resolve()
+            assert binding is not None
+            target_type = cast(type[Reference[Any]], binding.target_type)
+            reference_types = set(target_type.__reference_types__)
+            if not reference_types or reference_types & {"external", "uri"}:
+                continue
+
+            if binding.sub_field_name is None:
+                path.set(resource, locate(path.get(resource)), strict=False)
+                continue
+
+            head = f"{path.schema}:{path.parts[0]}" if path.schema else path.parts[0]
+            entries = Path(head).get(resource)
+            for entry in entries if isinstance(entries, list) else [entries]:
+                if entry is not None:
+                    reference = getattr(entry, binding.sub_field_name)
+                    setattr(entry, binding.sub_field_name, locate(reference))
 
     @staticmethod
     def resource_response(

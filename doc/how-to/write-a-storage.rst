@@ -64,6 +64,8 @@ Turn a row into a resource with the model that the provider gives for its resour
 ``version``. The version is the :mdn:`ETag` of the resource, so it must be a quoted entity tag,
 such as ``W/"3"`` (:rfc:`RFC 9110 §8.8.3 <9110#section-8.8.3>`). It must change on every write.
 The example counts the writes. Leave ``meta.location`` empty: the server builds it from its own URL.
+In the same way, a reference to another resource, such as ``members.$ref``, can be relative to
+the SCIM root, such as ``Users/2819c223``: the server returns its URL.
 
 .. literalinclude:: ../_examples/sqlite_storage.py
    :language: python

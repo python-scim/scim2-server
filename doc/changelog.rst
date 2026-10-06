@@ -1,6 +1,15 @@
 Changelog
 =========
 
+[0.6.2] - Unreleased
+--------------------
+
+Added
+^^^^^
+- A storage can return references to other resources relative to the SCIM root, such as
+  ``Users/2819c223`` in ``members.$ref``. The server returns them as the URLs of the resources,
+  with :meth:`~scim2_server.service.ScimService.reference_location`.
+
 [0.6.1] - 2026-10-05
 --------------------
 

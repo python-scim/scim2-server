@@ -49,6 +49,17 @@ layer that has the information:
      - the service
      - It depends on the URL of the server, which the storage does not know.
 
+References to other resources
+-----------------------------
+
+The ``$ref`` of a reference, such as ``members.$ref`` in a group, is a URL too. The storage does
+not know it either, but it knows the endpoint and the ``id`` of the target. It can return a
+reference relative to the SCIM root, such as ``Users/2819c223``
+(:rfc:`RFC 7643 §2.3.7 <7643#section-2.3.7>`). The service turns it into the location of the
+target, so it follows an override of
+:meth:`~scim2_server.service.ScimService.resource_location`. Absolute references are returned as
+they are.
+
 Why the resources are copies
 ----------------------------
 
