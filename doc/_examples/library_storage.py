@@ -20,6 +20,7 @@ from scim2_models import PreconditionFailedException
 from scim2_models import Required
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
@@ -143,7 +144,13 @@ class LibraryStorage(ScimStorage):
         self.connection = connection
         self.connection.row_factory = sqlite3.Row
 
-    def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+    def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
         table = TABLES[resource_type.name]
         row = None
         if resource_id.isdigit():

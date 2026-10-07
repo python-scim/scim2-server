@@ -29,16 +29,19 @@ from typing import Union
 from typing import cast
 
 import pytest
+from scim2_models import Context
 from scim2_models import NotFoundException
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import UniquenessException
 
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
+from scim2_server.storage import projection
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import parametrize
 
@@ -197,6 +200,52 @@ class ScimStorageContract:
 
         with pytest.raises(NotFoundException):
             storage.get(group_type, user.id)
+
+    @pytest.mark.parametrize(
+        "parameters",
+        [
+            {"excludedAttributes": "members"},
+            {"excludedAttributes": "members.display"},
+            {"attributes": "displayName"},
+            {"attributes": "members.value"},
+        ],
+    )
+    def test_get_keeps_what_the_response_returns(
+        self,
+        storage: Any,
+        user_type: ResourceType,
+        group_type: ResourceType,
+        user_model: Any,
+        group_model: Any,
+        parameters: dict[str, str],
+    ) -> None:
+        """A resource read with response parameters gives the same response as the whole resource."""
+        (user,) = self.create_users(storage, user_type, user_model, "bjensen")
+        group = storage.create(
+            group_type,
+            group_model.model_validate(
+                {
+                    "displayName": "Admins",
+                    "members": [{"value": user.id, "display": "bjensen"}],
+                }
+            ),
+        )
+        response_parameters = parametrize(
+            ResponseParameters, group_model
+        ).model_validate(parameters)
+
+        whole = storage.get(group_type, group.id)
+        projected = storage.get(
+            group_type, group.id, **projection(storage, response_parameters)
+        )
+
+        assert projected.model_dump(
+            scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
+            response_parameters=response_parameters,
+        ) == whole.model_dump(
+            scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
+            response_parameters=response_parameters,
+        )
 
     def test_update_replaces_the_stored_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any
@@ -492,8 +541,20 @@ class BlockingStorage(ScimStorage):
     def run(self, coroutine: Coroutine[Any, Any, T]) -> T:
         return self.runner.run(coroutine)
 
-    def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
-        return self.run(self.storage.get(resource_type, resource_id))
+    def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
+        return self.run(
+            self.storage.get(
+                resource_type,
+                resource_id,
+                **projection(self.storage, response_parameters),
+            )
+        )
 
     def search(
         self, resource_types: list[ResourceType], search_request: SearchRequest[Any]

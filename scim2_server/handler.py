@@ -15,6 +15,7 @@ from scim2_server.routing import Operation
 from scim2_server.service import ScimService
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
+from scim2_server.storage import projection
 
 
 class ScimHandler:
@@ -75,7 +76,9 @@ class ScimHandler:
             )
             with self.storage.operation():
                 resource = self.storage.get(
-                    resource_type, cast(str, target.resource_id)
+                    resource_type,
+                    cast(str, target.resource_id),
+                    **projection(self.storage, response_parameters),
                 )
             response = self.service.query_response(
                 request.base_url,
@@ -398,7 +401,9 @@ class AsyncScimHandler:
             )
             async with self.storage.operation():
                 resource = await self.storage.get(
-                    resource_type, cast(str, target.resource_id)
+                    resource_type,
+                    cast(str, target.resource_id),
+                    **projection(self.storage, response_parameters),
                 )
             response = self.service.query_response(
                 request.base_url,

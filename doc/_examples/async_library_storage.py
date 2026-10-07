@@ -10,6 +10,7 @@ from scim2_models import NotFoundException
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import SearchRequest
 from scim2_models import UniquenessException
 
@@ -37,7 +38,13 @@ class AsyncLibraryStorage(AsyncScimStorage):
             await self.connection.close()
             self.connection = None
 
-    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+    async def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
         table = TABLES[resource_type.name]
         connection = await self.connect()
         row = None

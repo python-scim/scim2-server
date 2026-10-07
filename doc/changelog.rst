@@ -4,9 +4,21 @@ Changelog
 [0.8.0] - Unreleased
 --------------------
 
+Added
+^^^^^
+- :meth:`ScimStorage.get <scim2_server.storage.ScimStorage.get>` receives the
+  ``attributes`` and ``excludedAttributes`` of a GET request in ``response_parameters``. A
+  storage can skip loading the attributes the response leaves out, such as the members of a
+  group.
+
 Changed
 ^^^^^^^
 - Requires scim2-models 0.12.1.
+
+Deprecated
+^^^^^^^^^^
+- A storage whose ``get`` method does not accept ``response_parameters`` raises a
+  :class:`DeprecationWarning`. scim2-server 0.9 will require it.
 
 [0.7.0] - 2026-10-06
 --------------------

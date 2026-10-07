@@ -11,6 +11,7 @@ from scim2_models import NotFoundException
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import UniquenessException
@@ -55,7 +56,13 @@ class SQLiteStorage(ScimStorage):
         )
         return resource
 
-    def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+    def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
         row = self.connection.execute(
             "SELECT * FROM resources WHERE resource_type = ? AND id = ?",
             (resource_type.name, resource_id),

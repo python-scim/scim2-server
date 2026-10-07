@@ -16,6 +16,7 @@ from scim2_models import Path
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import ScimFilter
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
@@ -23,6 +24,7 @@ from scim2_models import UniquenessException
 
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
+from scim2_server.storage import projection
 from scim2_server.utils import parametrize
 
 
@@ -68,7 +70,13 @@ class InMemoryStorage(ScimStorage):
         with self.lock:
             yield
 
-    def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+    def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
         with self.lock:
             return self.resources[self._index(resource_type, resource_id)].model_copy(
                 deep=True
@@ -236,8 +244,18 @@ class AsyncInMemoryStorage(AsyncScimStorage):
         """The stored resources."""
         return self.storage.resources
 
-    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
-        return self.storage.get(resource_type, resource_id)
+    async def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
+        return self.storage.get(
+            resource_type,
+            resource_id,
+            **projection(self.storage, response_parameters),
+        )
 
     async def search(
         self, resource_types: list[ResourceType], search_request: SearchRequest[Any]

@@ -100,6 +100,22 @@ identifier. Raise :class:`~scim2_models.NotFoundException` when it does not exis
          :pyobject: AsyncSQLiteStorage.get
          :dedent: 4
 
+For a GET request, the server also passes ``response_parameters``: the ``attributes`` and
+``excludedAttributes`` of the request. The example ignores them and returns the whole resource.
+The server removes the other attributes from the response. A storage can use them to avoid
+loading what the response leaves out, such as the members of a group kept in another table.
+:meth:`Path.iter_paths <scim2_models.Path.iter_paths>` gives the attributes the response keeps:
+
+.. code-block:: python
+
+    kept = Path[model].iter_paths(
+        attributes=response_parameters.attributes,
+        excluded_attributes=response_parameters.excluded_attributes,
+    )
+
+Without ``response_parameters``, return the whole resource. The server needs it for a PUT, a
+PATCH or a DELETE request.
+
 Create a resource
 -----------------
 

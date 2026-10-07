@@ -1,3 +1,5 @@
+import inspect
+import warnings
 from abc import ABC
 from abc import abstractmethod
 from contextlib import AbstractAsyncContextManager
@@ -7,7 +9,37 @@ from typing import Any
 
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import ResponseParameters
 from scim2_models import SearchRequest
+
+
+def takes_response_parameters(storage_class: type) -> bool:
+    """Tell whether the ``get`` method of a storage accepts ``response_parameters``, and warn when it does not."""
+    parameters = inspect.signature(storage_class.get).parameters.values()  # type: ignore[attr-defined]
+    if any(
+        parameter.name == "response_parameters"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    ):
+        return True
+    warnings.warn(
+        f"{storage_class.__qualname__}.get should accept a response_parameters "
+        "keyword argument. scim2-server 0.9 will require it.",
+        DeprecationWarning,
+        # takes_response_parameters, __init_subclass__, ABCMeta.__new__, then the class statement
+        stacklevel=4,
+    )
+    return False
+
+
+def projection(
+    storage: "ScimStorage | AsyncScimStorage",
+    response_parameters: ResponseParameters[Any] | None,
+) -> dict[str, Any]:
+    """Return the arguments that pass the response parameters to the get method of a storage, if it accepts them."""
+    if not storage._get_takes_response_parameters:
+        return {}
+    return {"response_parameters": response_parameters}
 
 
 class ScimStorage(ABC):
@@ -40,9 +72,34 @@ class ScimStorage(ABC):
       calling the storage.
     """
 
+    _get_takes_response_parameters = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._get_takes_response_parameters = takes_response_parameters(cls)
+
     @abstractmethod
-    def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+    def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
         """Return a resource.
+
+        The server passes ``response_parameters`` when it returns the resource
+        to the client, for a GET request. The storage may then leave out the
+        attributes the response does not keep, for instance to avoid loading
+        the members of a group. It must return every attribute the response
+        keeps. :meth:`Path.iter_paths <scim2_models.Path.iter_paths>` gives
+        them. The server applies the parameters to the response anyway.
+        Without ``response_parameters``, the storage returns the whole
+        resource.
+
+        A ``get`` method without ``response_parameters`` is deprecated, and
+        raises a :class:`DeprecationWarning`. The server then does not pass
+        the parameters. scim2-server 0.9 will require it.
 
         :raises ~scim2_models.NotFoundException: When no resource of this type
             has this identifier.
@@ -135,8 +192,20 @@ class AsyncScimStorage(ABC):
     which :class:`~scim2_server.testing.AsyncScimStorageContract` checks.
     """
 
+    _get_takes_response_parameters = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._get_takes_response_parameters = takes_response_parameters(cls)
+
     @abstractmethod
-    async def get(self, resource_type: ResourceType, resource_id: str) -> Resource[Any]:
+    async def get(
+        self,
+        resource_type: ResourceType,
+        resource_id: str,
+        *,
+        response_parameters: ResponseParameters[Any] | None = None,
+    ) -> Resource[Any]:
         """Return a resource. See :meth:`ScimStorage.get`."""
 
     @abstractmethod
