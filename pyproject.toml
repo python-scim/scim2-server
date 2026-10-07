@@ -58,7 +58,7 @@ dev = [
     "aiosqlite>=0.22.1",
     "precis-i18n>=1.1.2",
     "mypy>=2.3.1",
-    "scim2-client[werkzeug]>=0.11.2",
+    "scim2-client>=0.12.0",
     "scim2-tester>=0.5.1",
     "werkzeug>=3.0.3",
 ]
