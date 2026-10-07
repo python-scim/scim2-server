@@ -3,7 +3,9 @@ Serve an existing data model
 
 Use this guide to serve over SCIM the data an application already keeps in its own tables. It
 assumes :doc:`write-a-storage`, which explains the rules each storage method follows. The
-examples serve the members and the books of a library.
+examples serve the members and the books of a library. When the tables are SQLAlchemy models,
+`scim2-sqlalchemy <https://scim2-sqlalchemy.readthedocs.io>`_ provides this storage: a
+declaration maps the models, and the filters, sorts and pages become SQL queries.
 
 Describe the users
 ------------------
