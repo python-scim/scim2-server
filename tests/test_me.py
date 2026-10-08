@@ -15,6 +15,8 @@ from scim2_server.memory import InMemoryStorage
 from scim2_server.requests import ScimRequest
 from scim2_server.service import ScimService
 
+from .conftest import SECRET
+
 BASE_URL = "https://scim.example/v2"
 JSON = {"Content-Type": "application/scim+json"}
 PATCH = json.dumps(
@@ -127,7 +129,7 @@ def test_me_without_a_resource(handler, subject, status):
 @pytest.mark.parametrize("method", ["GET", "PUT", "PATCH", "DELETE", "POST"])
 def test_me_is_not_implemented_by_default(scim_provider, method):
     """Without an override of the service, every method on /Me answers 501."""
-    handler = ScimHandler(ScimService(scim_provider), InMemoryStorage())
+    handler = ScimHandler(ScimService(scim_provider, secret=SECRET), InMemoryStorage())
 
     assert serve(handler, me(method, ("User", "1"))).status == 501
 
@@ -156,4 +158,4 @@ def test_the_application_passes_its_subject(storage, scim_provider):
 def test_an_unknown_resource_type_name(scim_provider):
     """Looking up a resource type of an unknown name is a programming error."""
     with pytest.raises(ValueError, match="No resource type named 'Device'"):
-        ScimService(scim_provider).get_resource_type("Device")
+        ScimService(scim_provider, secret=SECRET).get_resource_type("Device")

@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any
 
 from scim2_models import SCIMException
@@ -19,12 +20,18 @@ class BaseApplication:
     :param service: The service serving the requests, built upon ``provider``.
         Pass a subclass of :class:`~scim2_server.service.ScimService` to change
         one of its steps, such as the URL of the resources. A
-        :class:`~scim2_server.service.ScimService` of ``provider`` by default.
+        :class:`~scim2_server.service.ScimService` of ``provider`` by default,
+        whose secret comes from the ``SCIM2_SERVER_SECRET`` environment
+        variable.
     """
 
     def __init__(self, provider: ScimProvider, service: ScimService | None = None):
         self.provider = provider
-        self.service = service if service is not None else ScimService(provider)
+        self.service = (
+            service
+            if service is not None
+            else ScimService(provider, secret=os.environ.get("SCIM2_SERVER_SECRET"))
+        )
         self.log = logging.getLogger("scim2_server")
 
     @staticmethod

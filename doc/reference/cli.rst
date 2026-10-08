@@ -39,7 +39,10 @@ discovery endpoints:
 - ``--schema``: a list of :class:`~scim2_models.Schema` objects;
 - ``--resource-type``: a list of :class:`~scim2_models.ResourceType` objects;
 - ``--service-provider-config``: a :class:`~scim2_models.ServiceProviderConfig` object, to turn
-  a feature such as the bulk requests or the sorting on or off.
+  a feature such as the bulk requests or the sorting on or off. The cursor pagination of
+  :doc:`../how-to/page-with-cursors` is off by default, and needs the ``cursor`` extra. The
+  server encrypts its cursors with the secret of the ``SCIM2_SERVER_SECRET`` environment
+  variable, or else with a secret drawn at start, so that its cursors do not survive a restart.
 
 .. code-block:: console
 

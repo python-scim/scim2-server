@@ -10,6 +10,9 @@ resources in memory.
 .. autoclass:: scim2_server.storage.AsyncScimStorage
    :members:
 
+.. autoclass:: scim2_server.storage.SearchPage
+   :members:
+
 .. autoclass:: scim2_server.memory.InMemoryStorage
    :members: generate_id, next_version, operation
 

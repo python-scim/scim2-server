@@ -16,6 +16,7 @@ from scim2_models import UniquenessException
 
 from doc._examples.library_storage import TABLES
 from scim2_server.storage import AsyncScimStorage
+from scim2_server.storage import SearchPage
 
 
 class AsyncLibraryStorage(AsyncScimStorage):
@@ -131,8 +132,12 @@ class AsyncLibraryStorage(AsyncScimStorage):
             raise UniquenessException from None
 
     async def search(
-        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
-    ) -> tuple[int, list[Resource[Any]]]:
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        *,
+        position: Any = None,
+    ) -> SearchPage:
         connection = await self.connect()
         found: list[Resource[Any]] = []
         for resource_type in resource_types:
@@ -144,6 +149,5 @@ class AsyncLibraryStorage(AsyncScimStorage):
                 resource for resource in found if search_request.filter.match(resource)
             ]
         found = search_request.sort(found)
-        start = (search_request.start_index or 1) - 1
-        stop = None if search_request.count is None else start + search_request.count
-        return len(found), found[start:stop]
+        page = found[search_request.start_index_0 : search_request.stop_index_0]
+        return SearchPage(len(found), page)

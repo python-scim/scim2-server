@@ -41,7 +41,10 @@ from scim2_models import UniquenessException
 
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
+from scim2_server.storage import SearchPage
+from scim2_server.storage import async_search_page
 from scim2_server.storage import projection
+from scim2_server.storage import search_page
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import parametrize
 
@@ -55,7 +58,8 @@ class ScimStorageContract:
     ``provider`` fixture, which serves the default resource types of
     :rfc:`RFC 7643 <7643>` unless overridden. The tests of a feature that the
     configuration of the provider does not announce, such as sorting, are
-    skipped.
+    skipped. So are the tests of the cursors, unless the storage
+    :attr:`~scim2_server.storage.ScimStorage.supports_cursors`.
     """
 
     supports_root_search: bool = True
@@ -96,6 +100,16 @@ class ScimStorageContract:
     ) -> SearchRequest[Any]:
         """Build a search request on the given models, as the server builds it."""
         return parametrize(SearchRequest, Union[tuple(models)])(**parameters)  # noqa: UP007
+
+    @staticmethod
+    def search(
+        storage: Any,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        position: Any = None,
+    ) -> Any:
+        """Search a storage as the server does, whether its search method accepts a position or not."""
+        return search_page(storage, resource_types, search_request, position)
 
     @staticmethod
     def require(supported: bool, feature: str) -> None:
@@ -389,19 +403,19 @@ class ScimStorageContract:
         self.create_users(storage, user_type, user_model, "alice", "bob")
         storage.create(group_type, group_model(display_name="admins"))
 
-        total, resources = storage.search(
-            [user_type], self.search_request([user_model])
-        )
+        page = self.search(storage, [user_type], self.search_request([user_model]))
 
-        assert total == 2
-        assert sorted(r.user_name for r in resources) == ["alice", "bob"]
+        assert page.total == 2
+        assert sorted(r.user_name for r in page.resources) == ["alice", "bob"]
 
     def test_search_returns_copies(
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
         """Changing a found resource does not change the stored one."""
         (user,) = self.create_users(storage, user_type, user_model, "bjensen")
-        _, (found,) = storage.search([user_type], self.search_request([user_model]))
+        (found,) = self.search(
+            storage, [user_type], self.search_request([user_model])
+        ).resources
         found.user_name = "changed"
 
         assert storage.get(user_type, user.id).user_name == "bjensen"
@@ -412,12 +426,14 @@ class ScimStorageContract:
         """A page holds count resources from startIndex, and the total counts them all."""
         self.create_users(storage, user_type, user_model, "alice", "bob", "carol")
 
-        total, resources = storage.search(
-            [user_type], self.search_request([user_model], start_index=2, count=1)
+        page = self.search(
+            storage,
+            [user_type],
+            self.search_request([user_model], start_index=2, count=1),
         )
 
-        assert total == 3
-        assert len(resources) == 1
+        assert page.total == 3
+        assert len(page.resources) == 1
 
     def test_search_without_count_returns_every_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any
@@ -425,12 +441,10 @@ class ScimStorageContract:
         """A search without count is not paged."""
         self.create_users(storage, user_type, user_model, "alice", "bob", "carol")
 
-        total, resources = storage.search(
-            [user_type], self.search_request([user_model])
-        )
+        page = self.search(storage, [user_type], self.search_request([user_model]))
 
-        assert total == 3
-        assert len(resources) == 3
+        assert page.total == 3
+        assert len(page.resources) == 3
 
     def test_search_with_a_filter(
         self,
@@ -443,13 +457,14 @@ class ScimStorageContract:
         self.require(self.announces(provider, "filter"), "filtering")
         self.create_users(storage, user_type, user_model, "alice", "bob", "carol")
 
-        total, resources = storage.search(
+        page = self.search(
+            storage,
             [user_type],
             self.search_request([user_model], filter='userName eq "bob"', count=10),
         )
 
-        assert total == 1
-        assert [r.user_name for r in resources] == ["bob"]
+        assert page.total == 1
+        assert [r.user_name for r in page.resources] == ["bob"]
 
     def test_search_sorted(
         self,
@@ -462,14 +477,15 @@ class ScimStorageContract:
         self.require(self.announces(provider, "sort"), "sorting")
         self.create_users(storage, user_type, user_model, "bob", "carol", "alice")
 
-        _, resources = storage.search(
+        page = self.search(
+            storage,
             [user_type],
             self.search_request(
                 [user_model], sort_by="userName", sort_order="descending", count=2
             ),
         )
 
-        assert [r.user_name for r in resources] == ["carol", "bob"]
+        assert [r.user_name for r in page.resources] == ["carol", "bob"]
 
     def test_search_at_the_root(
         self,
@@ -484,12 +500,14 @@ class ScimStorageContract:
         self.create_users(storage, user_type, user_model, "alice")
         storage.create(group_type, group_model(display_name="admins"))
 
-        total, resources = storage.search(
-            [user_type, group_type], self.search_request([user_model, group_model])
+        page = self.search(
+            storage,
+            [user_type, group_type],
+            self.search_request([user_model, group_model]),
         )
 
-        assert total == 2
-        assert {r.meta.resource_type for r in resources} == {
+        assert page.total == 2
+        assert {r.meta.resource_type for r in page.resources} == {
             user_type.name,
             group_type.name,
         }
@@ -509,13 +527,240 @@ class ScimStorageContract:
         self.create_users(storage, user_type, user_model, "alice")
         storage.create(group_type, group_model(display_name="admins"))
 
-        total, resources = storage.search(
+        page = self.search(
+            storage,
             [user_type, group_type],
             self.search_request([user_model, group_model], filter="userName pr"),
         )
 
-        assert total == 1
-        assert resources[0].user_name == "alice"
+        assert page.total == 1
+        assert page.resources[0].user_name == "alice"
+
+    def walk(
+        self,
+        storage: Any,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+    ) -> list[Any]:
+        """Return every page of a search paged with a cursor, from the first one."""
+        self.require(storage.supports_cursors, "cursor pagination")
+        pages = [self.search(storage, resource_types, search_request)]
+        while pages[-1].next is not None:
+            pages.append(
+                self.search(storage, resource_types, search_request, pages[-1].next)
+            )
+        return pages
+
+    def walk_back(
+        self,
+        storage: Any,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        page: Any,
+    ) -> list[Any]:
+        """Return the pages before a page, from the closest one, following the previous cursors."""
+        pages = []
+        while page.previous is not None:
+            page = self.search(storage, resource_types, search_request, page.previous)
+            pages.append(page)
+        return pages
+
+    @staticmethod
+    def ids(pages: list[Any]) -> list[str]:
+        return [resource.id for page in pages for resource in page.resources]
+
+    def test_cursor_pages_every_resource_once(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """Following the next cursors returns every resource once, count by count."""
+        names = ["alice", "bob", "carol", "dave", "erin"]
+        self.create_users(storage, user_type, user_model, *names)
+
+        pages = self.walk(
+            storage, [user_type], self.search_request([user_model], cursor="", count=2)
+        )
+
+        assert [len(page.resources) for page in pages] == [2, 2, 1]
+        assert sorted(r.user_name for page in pages for r in page.resources) == names
+        assert pages[0].previous is None
+        assert {page.total for page in pages} <= {5, None}
+
+    def test_cursor_pages_in_sort_order(
+        self,
+        storage: Any,
+        provider: ScimProvider,
+        user_type: ResourceType,
+        user_model: Any,
+    ) -> None:
+        """The pages of a sorted search follow each other in the sort order."""
+        self.require(self.announces(provider, "sort"), "sorting")
+        self.create_users(
+            storage, user_type, user_model, "dave", "alice", "carol", "bob"
+        )
+
+        pages = self.walk(
+            storage,
+            [user_type],
+            self.search_request(
+                [user_model],
+                cursor="",
+                count=3,
+                sort_by="userName",
+                sort_order="descending",
+            ),
+        )
+
+        assert [r.user_name for page in pages for r in page.resources] == [
+            "dave",
+            "carol",
+            "bob",
+            "alice",
+        ]
+
+    def test_cursor_pages_equal_sort_values_once(
+        self,
+        storage: Any,
+        provider: ScimProvider,
+        user_type: ResourceType,
+        user_model: Any,
+    ) -> None:
+        """Resources with the same sort value, or without one, are returned once, even across pages."""
+        self.require(self.announces(provider, "sort"), "sorting")
+        for user_name, nick_name in [
+            ("alice", "twin"),
+            ("bob", None),
+            ("carol", "twin"),
+            ("dave", "twin"),
+            ("erin", None),
+        ]:
+            storage.create(
+                user_type, user_model(user_name=user_name, nick_name=nick_name)
+            )
+
+        pages = self.walk(
+            storage,
+            [user_type],
+            self.search_request([user_model], cursor="", count=2, sort_by="nickName"),
+        )
+
+        names = [r.user_name for page in pages for r in page.resources]
+        assert sorted(names[:3]) == ["alice", "carol", "dave"]
+        assert sorted(names[3:]) == ["bob", "erin"]
+
+    def test_cursor_pages_back(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """Following the previous cursors from the last page returns the same pages, back to the first."""
+        self.create_users(
+            storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
+        )
+        search_request = self.search_request([user_model], cursor="", count=2)
+        forward = self.walk(storage, [user_type], search_request)
+
+        backward = self.walk_back(storage, [user_type], search_request, forward[-1])
+
+        assert [[r.id for r in page.resources] for page in reversed(backward)] == [
+            [r.id for r in page.resources] for page in forward[:-1]
+        ]
+        assert backward[-1].previous is None
+
+    @pytest.mark.parametrize("deleted", ["last of the page", "first of the page"])
+    def test_cursor_gives_stable_pages_when_a_resource_of_the_page_is_deleted(
+        self, storage: Any, user_type: ResourceType, user_model: Any, deleted: str
+    ) -> None:
+        """Deleting a resource already returned does not skip nor repeat the next ones."""
+        self.create_users(
+            storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
+        )
+        search_request = self.search_request([user_model], cursor="", count=2)
+        expected = self.ids(self.walk(storage, [user_type], search_request))
+        first = self.search(storage, [user_type], search_request)
+        victim = first.resources[-1 if deleted == "last of the page" else 0]
+
+        storage.delete(user_type, victim.id)
+        rest = [self.search(storage, [user_type], search_request, first.next)]
+        while rest[-1].next is not None:
+            rest.append(
+                self.search(storage, [user_type], search_request, rest[-1].next)
+            )
+
+        assert self.ids([first, *rest]) == expected
+
+    def test_cursor_gives_stable_pages_when_a_resource_is_created(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """Creating a resource between two pages does not skip nor repeat the existing ones."""
+        self.create_users(
+            storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
+        )
+        search_request = self.search_request([user_model], cursor="", count=2)
+        expected = self.ids(self.walk(storage, [user_type], search_request))
+        first = self.search(storage, [user_type], search_request)
+
+        (created,) = self.create_users(storage, user_type, user_model, "frank")
+        rest = [self.search(storage, [user_type], search_request, first.next)]
+        while rest[-1].next is not None:
+            rest.append(
+                self.search(storage, [user_type], search_request, rest[-1].next)
+            )
+
+        returned = self.ids([first, *rest])
+        assert [i for i in returned if i != created.id] == expected
+
+    def test_cursor_pages_back_after_a_deletion(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """Deleting the first resource of a page does not change the page before it."""
+        self.create_users(
+            storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
+        )
+        search_request = self.search_request([user_model], cursor="", count=2)
+        forward = self.walk(storage, [user_type], search_request)
+
+        storage.delete(user_type, forward[1].resources[0].id)
+        previous = self.search(
+            storage, [user_type], search_request, forward[1].previous
+        )
+
+        assert self.ids([previous]) == self.ids([forward[0]])
+        assert previous.previous is None
+
+    def test_cursor_with_count_zero(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """A count of 0 returns no resource and no cursor, so the client does not loop."""
+        self.require(storage.supports_cursors, "cursor pagination")
+        self.create_users(storage, user_type, user_model, "alice", "bob")
+
+        page = self.search(
+            storage, [user_type], self.search_request([user_model], cursor="", count=0)
+        )
+
+        assert page.resources == []
+        assert page.next is None
+        assert page.previous is None
+        assert page.total in (2, None)
+
+    def test_cursor_at_the_root(
+        self,
+        storage: Any,
+        user_type: ResourceType,
+        group_type: ResourceType,
+        user_model: Any,
+        group_model: Any,
+    ) -> None:
+        """A cursor pages the resources of several resource types as one collection."""
+        self.require(self.supports_root_search, "searching at the root")
+        users = self.create_users(storage, user_type, user_model, "alice", "bob")
+        group = storage.create(group_type, group_model(display_name="admins"))
+
+        pages = self.walk(
+            storage,
+            [user_type, group_type],
+            self.search_request([user_model, group_model], cursor="", count=1),
+        )
+
+        assert sorted(self.ids(pages)) == sorted([users[0].id, users[1].id, group.id])
 
     def test_operation(
         self, storage: Any, user_type: ResourceType, user_model: Any
@@ -537,6 +782,7 @@ class BlockingStorage(ScimStorage):
     def __init__(self, storage: AsyncScimStorage, runner: asyncio.Runner) -> None:
         self.storage = storage
         self.runner = runner
+        self.supports_cursors = storage.supports_cursors
 
     def run(self, coroutine: Coroutine[Any, Any, T]) -> T:
         return self.runner.run(coroutine)
@@ -557,9 +803,15 @@ class BlockingStorage(ScimStorage):
         )
 
     def search(
-        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
-    ) -> tuple[int, list[Resource[Any]]]:
-        return self.run(self.storage.search(resource_types, search_request))
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        *,
+        position: Any = None,
+    ) -> SearchPage:
+        return self.run(
+            async_search_page(self.storage, resource_types, search_request, position)
+        )
 
     def create(
         self, resource_type: ResourceType, resource: Resource[Any]

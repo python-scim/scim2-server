@@ -8,6 +8,9 @@ from scim2_models import NotFoundException
 
 from scim2_server.applications.wsgi import WSGIApplication
 from scim2_server.service import ScimService
+from scim2_server.storage import SearchPage
+
+from .conftest import SECRET
 
 
 class TestApplication:
@@ -118,7 +121,7 @@ def test_a_resource_of_an_unknown_type_from_the_storage(app, wsgi, first_fake_us
     (user,) = app.storage.resources
     user.meta.resource_type = "Unknown"
 
-    with patch.object(app.storage, "search", return_value=(1, [user])):
+    with patch.object(app.storage, "search", return_value=SearchPage(1, [user])):
         r = wsgi.get("/v2/Users")
 
     assert r.status_code == 500
@@ -132,7 +135,7 @@ def test_a_given_service_serves_the_requests(storage, scim_provider):
             return f"https://ids.example/{resource_type.id}/{resource_id}"
 
     app = WSGIApplication(
-        storage, scim_provider, service=ElsewhereService(scim_provider)
+        storage, scim_provider, service=ElsewhereService(scim_provider, secret=SECRET)
     )
     with httpx2.Client(
         transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"

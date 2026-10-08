@@ -233,8 +233,8 @@ Search the resources
 
 :meth:`~scim2_server.storage.ScimStorage.search` receives the resource types to search, and a
 validated :class:`~scim2_models.SearchRequest`. A search on an endpoint covers one resource type,
-and a search at the root covers all of them. Filter, sort and page the resources, and return the
-number of matching resources with the page:
+and a search at the root covers all of them. Filter, sort and page the resources, and return a
+:class:`~scim2_server.storage.SearchPage` with the page and the number of matching resources:
 
 .. tab-set::
    :class: outline
@@ -258,6 +258,14 @@ number of matching resources with the page:
 Count the matching resources before paging them: ``totalResults`` counts every matching
 resource, and the page holds at most ``count`` of them.
 
+A search receives a ``position`` too. It locates a page when a cursor pages the resources
+(:rfc:`9865`). The storage gives the positions of the next and the previous pages in the
+:class:`~scim2_server.storage.SearchPage`, and the server passes them back for the next request.
+The cursors must give stable pages, even when resources are created or deleted between two pages:
+:doc:`../explanation/pagination` explains why. A storage that gives them sets
+:attr:`~scim2_server.storage.ScimStorage.supports_cursors`, and :doc:`page-with-cursors`
+explains how. The storage of the example pages by index only.
+
 Search in a database
 --------------------
 
@@ -269,6 +277,8 @@ The search of the example reads every resource. A database storage translates th
 - :attr:`~scim2_models.SearchRequest.sort_by`, :attr:`~scim2_models.SearchRequest.sort_order`,
   :attr:`~scim2_models.SearchRequest.start_index` and :attr:`~scim2_models.SearchRequest.count`
   give the order and the page;
+- when :attr:`~scim2_models.SearchRequest.cursor` is not ``None``, a cursor pages the resources
+  from ``position``, as :doc:`page-with-cursors` explains;
 - a filter the storage cannot translate raises :class:`~scim2_models.InvalidFilterException`.
   The server then answers 400. Do not filter in Python after the query has paged the results:
   ``totalResults`` would be wrong.

@@ -18,6 +18,7 @@ extensions = [
     "sphinxarg.ext",
     "sphinx_design",
     "sphinx_issues",
+    "sphinxcontrib.mermaid",
 ]
 
 templates_path = ["_templates"]
@@ -48,6 +49,17 @@ intersphinx_mapping = {
 }
 
 nitpicky = True
+
+# Shibuya inverts the diagrams in dark mode.
+mermaid_light_theme = "neutral"
+mermaid_dark_theme = "neutral"
+mermaid_init_config = {
+    "startOnLoad": False,
+    "block": {"useMaxWidth": False},
+}
+mermaid_fullscreen = False
+mermaid_height = "auto"
+mermaid_width = "70%"
 
 # Autodoc renders an annotation with the module the object is defined in.
 # Sibling documentations only publish the public names, so unresolved

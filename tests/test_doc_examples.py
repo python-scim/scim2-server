@@ -9,12 +9,14 @@ from scim2_models import User
 
 from doc._examples import asgi_integration
 from doc._examples import wsgi_integration
+from doc._examples.async_cursor_storage import AsyncCursorSQLiteStorage
 from doc._examples.async_library_storage import AsyncLibraryStorage
 from doc._examples.async_sqlite_storage import AsyncSQLiteStorage
 from doc._examples.contract_without_root_search import TestStorageWithoutRootSearch
 from doc._examples.contract_without_search_features import (
     TestStorageWithoutFilterNorSort,
 )
+from doc._examples.cursor_storage import CursorSQLiteStorage
 from doc._examples.library_storage import BOOKS
 from doc._examples.library_storage import MEMBERS
 from doc._examples.library_storage import Book
@@ -25,6 +27,7 @@ from scim2_server.applications.asgi import ASGIApplication
 from scim2_server.applications.wsgi import WSGIApplication
 from scim2_server.testing import AsyncScimStorageContract
 from scim2_server.testing import ScimStorageContract
+from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_service_provider_config
 
 __all__ = ["TestStorageWithoutFilterNorSort", "TestStorageWithoutRootSearch"]
@@ -46,6 +49,41 @@ class TestAsyncSQLiteStorage(AsyncScimStorageContract):
     @pytest.fixture
     def async_storage(self, provider):
         storage = AsyncSQLiteStorage(":memory:", provider)
+        yield storage
+        asyncio.run(storage.close())
+
+
+def provider_without_filter_nor_sort():
+    provider = load_default_provider()
+    provider.config.filter.supported = False
+    provider.config.sort.supported = False
+    return provider
+
+
+class TestCursorSQLiteStorage(ScimStorageContract):
+    """The cursor storage of the "Page the results with cursors" guide follows the storage contract."""
+
+    @pytest.fixture
+    def provider(self):
+        return provider_without_filter_nor_sort()
+
+    @pytest.fixture
+    def storage(self, provider):
+        connection = sqlite3.connect(":memory:")
+        yield CursorSQLiteStorage(connection, provider)
+        connection.close()
+
+
+class TestAsyncCursorSQLiteStorage(AsyncScimStorageContract):
+    """The asynchronous cursor storage of the "Page the results with cursors" guide follows the storage contract."""
+
+    @pytest.fixture
+    def provider(self):
+        return provider_without_filter_nor_sort()
+
+    @pytest.fixture
+    def async_storage(self, provider):
+        storage = AsyncCursorSQLiteStorage(":memory:", provider)
         yield storage
         asyncio.run(storage.close())
 

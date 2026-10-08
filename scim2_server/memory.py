@@ -10,6 +10,7 @@ from typing import Union
 from typing import cast
 
 from scim2_models import AttributeBinding
+from scim2_models import InvalidCursorException
 from scim2_models import Meta
 from scim2_models import NotFoundException
 from scim2_models import Path
@@ -24,13 +25,121 @@ from scim2_models import UniquenessException
 
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
+from scim2_server.storage import SearchPage
 from scim2_server.storage import projection
+from scim2_server.storage import search_page
 from scim2_server.utils import parametrize
 
 
 def utcnow() -> datetime.datetime:
     """Return the current date, in UTC."""
     return datetime.datetime.now(datetime.UTC)
+
+
+def _page(
+    search_request: SearchRequest[Any], position: Any, resources: list[Resource[Any]]
+) -> SearchPage:
+    """Sort every matching resource by its sort value then its identifier, and return the page a search asks for.
+
+    A cursor position holds the sort value and the identifier of the resource
+    the page starts after, or ends before, so the pages stay stable.
+    """
+    descending = (
+        search_request.sort_by is not None
+        and search_request.sort_order == SearchRequest.SortOrder.descending
+    )
+    pairs = sorted(
+        ((_sort_key(search_request, resource), resource) for resource in resources),
+        key=lambda pair: pair[0],
+        reverse=descending,
+    )
+    found = [resource for _, resource in pairs]
+    if search_request.cursor is None:
+        start = search_request.start_index_0 or 0
+        stop = None if search_request.count is None else start + search_request.count
+        return SearchPage(len(found), found[start:stop])
+
+    if search_request.count == 0:
+        return SearchPage(len(found), [])
+
+    start, stop = _bounds(
+        [key for key, _ in pairs], position, search_request.count, descending
+    )
+    page = SearchPage(len(found), found[start:stop])
+    if page.resources and stop < len(found):
+        page.next = _position("next", pairs[stop - 1][0])
+    if page.resources and start > 0:
+        page.previous = _position("previous", pairs[start][0])
+    return page
+
+
+SortKey = tuple[bool, Any, str]
+
+
+def _sort_key(search_request: SearchRequest[Any], resource: Resource[Any]) -> SortKey:
+    """Return the key that orders a resource: its sort value, missing values last, then its identifier."""
+    value = search_request.sort_value(resource)
+    return value is None, value if value is not None else "", cast(str, resource.id)
+
+
+def _bounds(
+    keys: list[SortKey], position: Any, count: int | None, descending: bool
+) -> tuple[int, int]:
+    """Return the slice of the sorted keys that a cursor page covers."""
+    if position is None:
+        return 0, len(keys) if count is None else min(count, len(keys))
+
+    direction, anchor = _read_position(position)
+
+    def before(key: SortKey) -> bool:
+        return key > anchor if descending else key < anchor
+
+    if direction == "next":
+        start = sum(1 for key in keys if before(key) or key == anchor)
+        stop = len(keys) if count is None else min(start + count, len(keys))
+        return start, stop
+
+    stop = sum(1 for key in keys if before(key))
+    start = 0 if count is None else max(stop - count, 0)
+    return start, stop
+
+
+def _position(direction: str, key: SortKey) -> dict[str, Any]:
+    """Return the position of the page that starts after, or ends before, a sort key."""
+    missing, value, identifier = key
+    return {"d": direction, "k": None if missing else _encode(value), "i": identifier}
+
+
+def _read_position(position: Any) -> tuple[str, SortKey]:
+    """Return the direction and the sort key of a position that _page gave."""
+    try:
+        direction, value, identifier = position["d"], position["k"], position["i"]
+    except (TypeError, KeyError):
+        raise InvalidCursorException from None
+    if direction not in ("next", "previous") or not isinstance(identifier, str):
+        raise InvalidCursorException
+    if value is None:
+        return direction, (True, "", identifier)
+    return direction, (False, _decode(value), identifier)
+
+
+def _encode(value: Any) -> Any:
+    """Return a sort value in a form JSON can hold."""
+    if isinstance(value, datetime.datetime):
+        return {"datetime": value.isoformat()}
+    if isinstance(value, str | bool | int | float):
+        return value
+    raise TypeError(f"A cursor cannot hold a sort value of type {type(value).__name__}")
+
+
+def _decode(value: Any) -> Any:
+    """Return the sort value that _encode gave."""
+    if not isinstance(value, dict):
+        return value
+    try:
+        return datetime.datetime.fromisoformat(value["datetime"])
+    except (KeyError, TypeError, ValueError):
+        raise InvalidCursorException from None
 
 
 class InMemoryStorage(ScimStorage):
@@ -42,6 +151,8 @@ class InMemoryStorage(ScimStorage):
     :param clock: Return the date of a write, for ``meta.created`` and
         ``meta.lastModified``. Pass a fixed clock to get predictable dates.
     """
+
+    supports_cursors = True
 
     def __init__(self, clock: Callable[[], datetime.datetime] = utcnow) -> None:
         self.resources: list[Resource[Any]] = []
@@ -83,8 +194,12 @@ class InMemoryStorage(ScimStorage):
             )
 
     def search(
-        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
-    ) -> tuple[int, list[Resource[Any]]]:
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        *,
+        position: Any = None,
+    ) -> SearchPage:
         with self.lock:
             candidates = [
                 resource.model_copy(deep=True)
@@ -98,13 +213,7 @@ class InMemoryStorage(ScimStorage):
             scim_filter = parametrize(ScimFilter, Union[models])(str(scim_filter))  # noqa: UP007
 
         found = [r for r in candidates if scim_filter is None or scim_filter.match(r)]
-        found = search_request.sort(found)
-
-        start_index = (search_request.start_index or 1) - 1
-        page = found[start_index:]
-        if search_request.count is not None:
-            page = page[: search_request.count]
-        return len(found), page
+        return _page(search_request, position, found)
 
     def create(
         self, resource_type: ResourceType, resource: Resource[Any]
@@ -236,6 +345,8 @@ class AsyncInMemoryStorage(AsyncScimStorage):
         :class:`InMemoryStorage` to change how identifiers are generated.
     """
 
+    supports_cursors = True
+
     def __init__(self, storage: InMemoryStorage | None = None) -> None:
         self.storage = storage if storage is not None else InMemoryStorage()
 
@@ -258,9 +369,13 @@ class AsyncInMemoryStorage(AsyncScimStorage):
         )
 
     async def search(
-        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
-    ) -> tuple[int, list[Resource[Any]]]:
-        return self.storage.search(resource_types, search_request)
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        *,
+        position: Any = None,
+    ) -> SearchPage:
+        return search_page(self.storage, resource_types, search_request, position)
 
     async def create(
         self, resource_type: ResourceType, resource: Resource[Any]

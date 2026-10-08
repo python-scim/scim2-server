@@ -1,7 +1,9 @@
 import argparse
 import json
 import logging
+import os
 import pprint
+import secrets
 from collections.abc import Iterable
 from socketserver import ThreadingMixIn
 from typing import TYPE_CHECKING
@@ -17,6 +19,7 @@ from scim2_models import ServiceProviderConfig
 from scim2_server.applications.wsgi import ForwardedHeaders
 from scim2_server.applications.wsgi import TenantDispatcher
 from scim2_server.memory import InMemoryStorage
+from scim2_server.service import ScimService
 from scim2_server.testserver.application import BEARER_TOKEN_SCHEME
 from scim2_server.testserver.application import BearerTokenApplication
 from scim2_server.utils import load_default_resource_types
@@ -78,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=argparse.FileType("r"),
         metavar="FILE",
         help="Announce the service provider configuration of a JSON file. "
-        "Defaults to every feature supported.",
+        "Defaults to every feature supported, except cursor pagination.",
     )
     parser.add_argument(
         "--bearer-token",
@@ -190,12 +193,26 @@ def main() -> None:
         schemas, resource_types, config=config, policy=policy
     )
 
+    try:
+        # The server runs in a single process, so a secret drawn at start serves
+        # every cursor it issues.
+        secret = os.environ.get("SCIM2_SERVER_SECRET") or secrets.token_urlsafe(32)
+        service = ScimService(provider, secret=secret)
+    except ModuleNotFoundError:
+        parser.error(
+            "cursor pagination needs the cursor extra: "
+            "pip install 'scim2-server[cursor]'"
+        )
+
     storages: dict[str | None, InMemoryStorage] = {}
 
     def make_application(tenant: str | None = None) -> BearerTokenApplication:
         storages[tenant] = InMemoryStorage()
         return BearerTokenApplication(
-            storages[tenant], provider, bearer_tokens=args.bearer_token or []
+            storages[tenant],
+            provider,
+            service=service,
+            bearer_tokens=args.bearer_token or [],
         )
 
     def make_tenant_application(tenant: str) -> BearerTokenApplication | None:

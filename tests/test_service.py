@@ -19,6 +19,8 @@ from scim2_server.service import ScimService
 from scim2_server.service import is_json_media_type
 from scim2_server.utils import load_default_provider
 
+from .conftest import SECRET
+
 
 @pytest.mark.parametrize(
     ("content_type", "is_json"),
@@ -41,7 +43,9 @@ def test_json_media_types(content_type, is_json):
 
 def test_error_response(scim_provider):
     """An exception becomes the SCIM error response of its status."""
-    result = ScimService(scim_provider).error_response(NotFoundException(detail="Gone"))
+    result = ScimService(scim_provider, secret=SECRET).error_response(
+        NotFoundException(detail="Gone")
+    )
 
     assert result.status == 404
     assert result.body["detail"] == "Gone"
@@ -50,7 +54,9 @@ def test_error_response(scim_provider):
 
 def test_unexpected_error_response(scim_provider):
     """An unexpected exception becomes a 500 that discloses nothing."""
-    result = ScimService(scim_provider).error_response(RuntimeError("secret"))
+    result = ScimService(scim_provider, secret=SECRET).error_response(
+        RuntimeError("secret")
+    )
 
     assert result.status == 500
     assert result.body["detail"] == "Internal server error"
@@ -61,7 +67,7 @@ def test_a_validation_error_is_unexpected(scim_provider):
     with pytest.raises(ValidationError) as excinfo:
         SearchRequest.model_validate({"count": "many"})
 
-    result = ScimService(scim_provider).error_response(excinfo.value)
+    result = ScimService(scim_provider, secret=SECRET).error_response(excinfo.value)
 
     assert result.status == 500
 
@@ -91,7 +97,7 @@ INVALID_REQUESTS = {
 )
 def test_an_invalid_request_raises_a_scim_exception(scim_provider, scim_request):
     """The handler turns the validation errors of a request into SCIM exceptions answering 400."""
-    handler = ScimHandler(ScimService(scim_provider), InMemoryStorage())
+    handler = ScimHandler(ScimService(scim_provider, secret=SECRET), InMemoryStorage())
 
     with pytest.raises(SCIMException) as excinfo:
         handler.handle(scim_request)
@@ -106,7 +112,9 @@ def test_an_invalid_request_raises_a_scim_exception_asynchronously(
     scim_provider, scim_request
 ):
     """The asynchronous handler turns the validation errors of a request into SCIM exceptions."""
-    handler = AsyncScimHandler(ScimService(scim_provider), AsyncInMemoryStorage())
+    handler = AsyncScimHandler(
+        ScimService(scim_provider, secret=SECRET), AsyncInMemoryStorage()
+    )
 
     with pytest.raises(SCIMException) as excinfo:
         asyncio.run(handler.handle(scim_request))
@@ -121,7 +129,7 @@ def scheme(type):
 def service_announcing(*types):
     provider = load_default_provider()
     provider.config.authentication_schemes = [scheme(type) for type in types]
-    return ScimService(provider)
+    return ScimService(provider, secret=SECRET)
 
 
 @pytest.mark.parametrize(
@@ -180,7 +188,7 @@ def test_the_challenge_can_be_overridden(scim_provider):
 def test_max_body_size(scim_provider, method, path, size):
     """Only a bulk request has a limit. A request that fails whatever its body gets no body."""
     request = ScimRequest(method, "https://scim.example/v2", path)
-    assert ScimService(scim_provider).max_body_size(request) == size
+    assert ScimService(scim_provider, secret=SECRET).max_body_size(request) == size
 
 
 @pytest.mark.parametrize(
@@ -191,4 +199,4 @@ def test_max_body_size_without_bulk(bulk):
     provider = load_default_provider()
     provider.config.bulk = bulk
     request = ScimRequest("POST", "https://scim.example/v2", "/Bulk")
-    assert ScimService(provider).max_body_size(request) == 0
+    assert ScimService(provider, secret=SECRET).max_body_size(request) == 0
