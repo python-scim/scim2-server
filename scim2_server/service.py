@@ -1,6 +1,9 @@
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import replace
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
 from typing import Union
@@ -27,6 +30,7 @@ from scim2_models import ListResponse
 from scim2_models import Meta
 from scim2_models import NotFoundException
 from scim2_models import NotImplementedException
+from scim2_models import Pagination
 from scim2_models import Patch
 from scim2_models import PatchOp
 from scim2_models import Path
@@ -51,7 +55,11 @@ from scim2_server.responses import ScimResponse
 from scim2_server.routing import Operation
 from scim2_server.routing import Target
 from scim2_server.routing import match
+from scim2_server.storage import SearchPage
 from scim2_server.utils import parametrize
+
+if TYPE_CHECKING:
+    from scim2_server.cursor import Cursors
 
 
 def scim_exception_of(exception: ValidationError) -> SCIMException:
@@ -87,6 +95,7 @@ SEARCH_REQUEST_PARAMETERS = (
     "sortOrder",
     "startIndex",
     "count",
+    "cursor",
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -142,11 +151,43 @@ class ScimService:
     Every public method can be overridden. ``base_url`` is the root URL of the
     SCIM endpoints, as the client sees it, such as
     ``https://example.com/scim/v2``.
+
+    :param secret: The secret of the service, which every process of the
+        server shares, such as a random string kept in the configuration. The
+        cursors of :rfc:`RFC 9865 <9865>` derive their key from it, so a
+        configuration that announces cursor pagination requires it, and the
+        ``cursor`` extra.
+    :raises ValueError: When the configuration announces cursor pagination
+        without a secret.
+    :raises ModuleNotFoundError: When the configuration announces cursor
+        pagination without the ``cursor`` extra.
     """
 
-    def __init__(self, provider: ScimProvider):
+    def __init__(
+        self, provider: ScimProvider, *, secret: str | bytes | None = None
+    ) -> None:
         self.provider = provider
         self.config = provider.config or patch_only_config()
+        self._cursors = (
+            self._build_cursors(secret)
+            if self._pages_by(Pagination.DefaultPaginationMethod.cursor)
+            else None
+        )
+
+    @staticmethod
+    def _build_cursors(secret: str | bytes | None) -> "Cursors":
+        """Return what seals and opens the cursors of the service."""
+        if secret is None:
+            raise ValueError("Cursor pagination needs the secret of the service.")
+        try:
+            # Imported on demand, so that the server runs without the cursor extra.
+            from scim2_server.cursor import Cursors
+        except ModuleNotFoundError as exception:
+            raise ModuleNotFoundError(
+                "Cursor pagination needs the cursor extra: "
+                "pip install 'scim2-server[cursor]'"
+            ) from exception
+        return Cursors(secret)
 
     # -- Resource types and models --------------------------------------
 
@@ -686,8 +727,11 @@ class ScimService:
 
     def read_search_query(
         self, resource_types: list[ResourceType], query: Mapping[str, str]
-    ) -> SearchRequest[Any]:
-        """Read the query parameters of a search with GET (:rfc:`RFC 7644 §3.4.2 <7644#section-3.4.2>`)."""
+    ) -> tuple[SearchRequest[Any], Any]:
+        """Read the query parameters of a search with GET (:rfc:`RFC 7644 §3.4.2 <7644#section-3.4.2>`).
+
+        See :meth:`read_search` for what it returns.
+        """
         return self.read_search(
             resource_types,
             {key: query[key] for key in SEARCH_REQUEST_PARAMETERS if key in query},
@@ -698,20 +742,43 @@ class ScimService:
         resource_types: list[ResourceType],
         body: bytes,
         content_type: str | None,
-    ) -> SearchRequest[Any]:
-        """Read the body of a search with POST on ".search" (:rfc:`RFC 7644 §3.4.3 <7644#section-3.4.3>`)."""
+    ) -> tuple[SearchRequest[Any], Any]:
+        """Read the body of a search with POST on ".search" (:rfc:`RFC 7644 §3.4.3 <7644#section-3.4.3>`).
+
+        See :meth:`read_search` for what it returns.
+        """
         return self.read_search(resource_types, self.decode_body(body, content_type))
 
     def read_search(
         self, resource_types: list[ResourceType], payload: Any
-    ) -> SearchRequest[Any]:
-        """Validate a search request, and bound its count by maxResults."""
+    ) -> tuple[SearchRequest[Any], Any]:
+        """Validate a search request, and return it with the position of the page its cursor asks for.
+
+        The search pages by cursor or by index, as the request asks, or else
+        as the ``pagination`` of the configuration says. Its ``count`` is
+        bounded by ``maxResults`` and ``maxPageSize``, and is
+        ``defaultPageSize`` when the request has none.
+
+        A search paged by cursor keeps an empty
+        :attr:`~scim2_models.SearchRequest.cursor`, which the storage expects.
+        The position is :data:`None` on the first page.
+
+        :raises ~scim2_models.InvalidCursorException: When the cursor was not
+            issued by this service, or for another query.
+        :raises ~scim2_models.InvalidCountException: When the cursor was
+            issued for another ``count``.
+        :raises ~scim2_models.ExpiredCursorException: When the cursor is
+            older than the ``cursorTimeout`` of the configuration.
+        :raises ~scim2_models.NotImplementedException: When the configuration
+            does not announce the pagination method of the request.
+        """
         # The filters of PATCH paths are part of the PATCH capability: the
         # filter capability of RFC 7643 §5 refers to the search parameter of
         # RFC 7644 §3.4.2.2 only.
         parameters = (
             {key.casefold() for key in payload} if isinstance(payload, dict) else set()
         )
+
         if "filter" in parameters:
             self.ensure_supported(self.config.filter, "Filtering")
         if parameters & {"sortby", "sortorder"}:
@@ -724,13 +791,129 @@ class ScimService:
             ).model_validate(payload, scim_ctx=Context.SEARCH_REQUEST)
         except ValidationError as exception:
             raise scim_exception_of(exception) from exception
-        search_request.start_index = search_request.start_index or 1
-        max_results = self.config.filter.max_results if self.config.filter else None
-        if max_results is not None and (
-            search_request.count is None or search_request.count > max_results
+
+        if search_request.cursor is not None and search_request.start_index is not None:
+            raise InvalidValueException(
+                detail="A search cannot have both a cursor and a startIndex"
+            )
+
+        if (
+            search_request.cursor is None
+            and search_request.start_index is None
+            and self._default_pagination() == Pagination.DefaultPaginationMethod.cursor
         ):
-            search_request.count = max_results
-        return search_request
+            search_request.cursor = ""
+
+        if search_request.cursor is None:
+            self._ensure_pages_by(Pagination.DefaultPaginationMethod.index)
+            search_request.start_index = search_request.start_index or 1
+        else:
+            self._ensure_pages_by(Pagination.DefaultPaginationMethod.cursor)
+
+        self._bound_count(search_request)
+        return search_request, self._open_cursor(resource_types, search_request)
+
+    def _pages_by(self, method: Pagination.DefaultPaginationMethod) -> bool:
+        """Tell whether the configuration announces a pagination method.
+
+        Without pagination in the configuration, the service pages by index
+        only.
+        """
+        pagination = self.config.pagination
+        if pagination is None:
+            return method == Pagination.DefaultPaginationMethod.index
+        return bool(getattr(pagination, method.value))
+
+    def _ensure_pages_by(self, method: Pagination.DefaultPaginationMethod) -> None:
+        """Refuse with a 501 a pagination method the configuration does not announce."""
+        if not self._pages_by(method):
+            raise NotImplementedException(
+                detail=f"Pagination by {method.value} is not supported"
+            )
+
+    def _default_pagination(self) -> Pagination.DefaultPaginationMethod:
+        """Return the pagination method of a search that asks for none.
+
+        It is the defaultPaginationMethod of the configuration. Without it,
+        the index is the default when the configuration announces it, as RFC
+        9865 §2.4 recommends.
+        """
+        pagination = self.config.pagination
+        if pagination is not None and pagination.default_pagination_method:
+            return pagination.default_pagination_method
+        if self._pages_by(Pagination.DefaultPaginationMethod.index):
+            return Pagination.DefaultPaginationMethod.index
+        return Pagination.DefaultPaginationMethod.cursor
+
+    def _bound_count(self, search_request: SearchRequest[Any]) -> None:
+        """Give a search without count the defaultPageSize, and bound its count by maxResults and maxPageSize."""
+        pagination = self.config.pagination
+        if search_request.count is None and pagination is not None:
+            search_request.count = pagination.default_page_size
+
+        bounds = [
+            bound
+            for bound in (
+                self.config.filter.max_results if self.config.filter else None,
+                pagination.max_page_size if pagination else None,
+            )
+            if bound is not None
+        ]
+        if bounds and (
+            search_request.count is None or search_request.count > min(bounds)
+        ):
+            search_request.count = min(bounds)
+
+    def _open_cursor(
+        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> Any:
+        """Return the position a cursor holds, or None for the first page, and leave an empty cursor in the request."""
+        if not search_request.cursor:
+            return None
+
+        assert self._cursors is not None
+        assert self.config.pagination is not None
+
+        position = self._cursors.open(
+            search_request.cursor,
+            self._query_digest(resource_types, search_request),
+            search_request.count,
+            self.config.pagination.cursor_timeout,
+        )
+        search_request.cursor = ""
+        return position
+
+    def _seal(
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        position: Any,
+    ) -> str | None:
+        """Return the cursor of a position the storage gave, or None when there is no such page."""
+        if position is None:
+            return None
+        assert self._cursors is not None
+        return self._cursors.seal(
+            self._query_digest(resource_types, search_request),
+            search_request.count,
+            position,
+        )
+
+    @staticmethod
+    def _query_digest(
+        resource_types: list[ResourceType], search_request: SearchRequest[Any]
+    ) -> str:
+        """Return a digest of a search, without its cursor and its count, so that a cursor only serves the query it was issued for."""
+        query = {
+            "resourceTypes": [resource_type.id for resource_type in resource_types],
+            "request": search_request.model_dump(
+                mode="json",
+                exclude={"cursor", "count", "start_index"},
+                exclude_none=True,
+            ),
+        }
+        canonical = json.dumps(query, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()[:32]
 
     def searched_types(self, endpoint: str | None) -> list[ResourceType]:
         """Return the resource types a search covers: those of the endpoint, or all of them at the root."""
@@ -741,22 +924,35 @@ class ScimService:
     def search_response(
         self,
         base_url: str,
-        total_results: int,
-        resources: list[Resource[Any]],
+        resource_types: list[ResourceType],
+        page: SearchPage,
         search_request: SearchRequest[Any],
     ) -> ScimResponse:
-        """Return the response listing a page of found resources."""
+        """Return the response listing a page of found resources.
+
+        :raises ValueError: When the storage gives no total for a search paged
+            by index.
+        """
+        by_cursor = search_request.cursor is not None
+        if not by_cursor and page.total is None:
+            raise ValueError("The storage gave no total for a search paged by index")
+        next_cursor = previous_cursor = None
+        if by_cursor and search_request.count != 0:
+            next_cursor = self._seal(resource_types, search_request, page.next)
+            previous_cursor = self._seal(resource_types, search_request, page.previous)
         dumped = [
             self.publish(base_url, resource).model_dump(
                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
                 response_parameters=search_request,
             )
-            for resource in resources
+            for resource in page.resources
         ]
         response = parametrize(ListResponse, Union[tuple(self.get_models())])(  # noqa: UP007
-            total_results=total_results,
+            total_results=page.total,
             items_per_page=len(dumped),
-            start_index=search_request.start_index,
+            start_index=None if by_cursor else search_request.start_index,
+            next_cursor=next_cursor,
+            previous_cursor=previous_cursor,
             resources=dumped,
         )
         return ScimResponse(

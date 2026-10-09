@@ -15,6 +15,8 @@ from scim2_server.routing import Operation
 from scim2_server.routing import Target
 from scim2_server.service import ScimService
 
+from .conftest import SECRET
+
 BASE_URL = "https://scim.example/v2"
 JSON = {"Content-Type": "application/scim+json"}
 USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
@@ -115,7 +117,7 @@ def user_names(handler):
 
 def test_every_operation_is_accepted_by_default(scim_provider):
     """A service that does not override authorize serves every operation."""
-    handler = ScimHandler(ScimService(scim_provider), InMemoryStorage())
+    handler = ScimHandler(ScimService(scim_provider, secret=SECRET), InMemoryStorage())
 
     user_id = create_user(handler)
 

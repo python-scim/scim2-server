@@ -1,6 +1,58 @@
 Changelog
 =========
 
+[0.8.0] - Unreleased
+--------------------
+
+Added
+^^^^^
+- Cursor pagination of :rfc:`9865`. A configuration that announces it in ``pagination`` gets
+  ``nextCursor`` and ``previousCursor`` in the search responses. The clients cannot read or
+  forge the cursors. The server refuses a cursor of another query, another ``count``, or older
+  than ``cursorTimeout``. The cursors give stable pages: a resource that exists during the whole
+  paging is returned once, even when others are created or deleted. Cursor pagination needs the
+  new ``secret`` parameter of :class:`~scim2_server.service.ScimService`, the ``cursor`` extra, and
+  a storage that sets the new
+  :attr:`~scim2_server.storage.ScimStorage.supports_cursors`, such as
+  :class:`~scim2_server.memory.InMemoryStorage`. The server refuses to start otherwise.
+- The ``scim2-server`` command pages with cursors when its ``--service-provider-config``
+  announces them. Its container image includes the ``cursor`` extra.
+- :class:`~scim2_server.applications.wsgi.WSGIApplication` and
+  :class:`~scim2_server.applications.asgi.ASGIApplication` give their default service the secret
+  of the ``SCIM2_SERVER_SECRET`` environment variable.
+- The ``maxPageSize`` of ``pagination`` bounds the ``count`` of every search.
+- :class:`~scim2_server.testing.ScimStorageContract` and
+  :class:`~scim2_server.testing.AsyncScimStorageContract` check that the cursors of the
+  storages that support them give stable pages.
+
+Changed
+^^^^^^^
+- :meth:`ScimStorage.search <scim2_server.storage.ScimStorage.search>` returns a
+  :class:`~scim2_server.storage.SearchPage` instead of a tuple, and takes the ``position`` of the
+  page when a cursor pages the resources. This also applies to code that calls it directly, such
+  as the ``search`` method of :class:`~scim2_server.memory.InMemoryStorage`.
+- :class:`~scim2_server.memory.InMemoryStorage` returns the resources in the order of their
+  identifiers when the search has no ``sortBy``, instead of the order of creation. The same goes
+  for the resources with the same sort value.
+- For the subclasses of :class:`~scim2_server.service.ScimService`:
+  :meth:`~scim2_server.service.ScimService.read_search`, ``read_search_query`` and
+  ``read_search_body`` return the search request with the position of the page its cursor asks
+  for, and :meth:`~scim2_server.service.ScimService.search_response` takes the searched resource
+  types and a :class:`~scim2_server.storage.SearchPage` instead of the number of resources and
+  the page.
+- The WSGI and ASGI applications keep the query parameters without a value, as scim2-flask does.
+  An empty ``filter``, ``sortBy`` or ``count`` gets a 400 response instead of being ignored.
+- With ``pagination`` in the configuration, a search without ``count`` gets ``defaultPageSize``
+  resources, by index as by cursor, instead of every resource up to ``maxResults``.
+- A search with a ``cursor`` gets a 501 response when the configuration does not announce
+  cursor pagination, instead of ignoring the cursor.
+
+Deprecated
+^^^^^^^^^^
+- A storage whose ``search`` method does not accept ``position`` raises a
+  :class:`DeprecationWarning`. Such a storage pages by index only. scim2-server 0.9 will require
+  ``position``.
+
 [0.7.1] - 2026-10-07
 --------------------
 

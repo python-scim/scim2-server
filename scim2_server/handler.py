@@ -2,6 +2,7 @@ from typing import Any
 from typing import cast
 
 from scim2_models import BulkOperation
+from scim2_models import Pagination
 from scim2_models import PatchOp
 from scim2_models import Resource
 from scim2_models import ResourceType
@@ -15,7 +16,21 @@ from scim2_server.routing import Operation
 from scim2_server.service import ScimService
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
+from scim2_server.storage import async_search_page
 from scim2_server.storage import projection
+from scim2_server.storage import search_page
+
+
+def _check_cursors(
+    service: ScimService, storage: ScimStorage | AsyncScimStorage
+) -> None:
+    """Refuse a storage without cursors, when the configuration of the service announces them."""
+    supported = storage.supports_cursors and storage._search_takes_position
+    if service._pages_by(Pagination.DefaultPaginationMethod.cursor) and not supported:
+        raise TypeError(
+            f"The configuration announces cursor pagination, which "
+            f"{type(storage).__qualname__} does not support."
+        )
 
 
 class ScimHandler:
@@ -28,9 +43,14 @@ class ScimHandler:
     :class:`~scim2_models.SCIMException`, that :meth:`ScimService.error_response
     <scim2_server.service.ScimService.error_response>` turns into a response.
     Any other exception is a bug.
+
+    :raises TypeError: When the configuration of the service announces
+        cursor pagination, and the storage does not
+        :attr:`~scim2_server.storage.ScimStorage.supports_cursors`.
     """
 
     def __init__(self, service: ScimService, storage: ScimStorage):
+        _check_cursors(service, storage)
         self.service = service
         self.storage = storage
 
@@ -205,13 +225,15 @@ class ScimHandler:
             authorized_types = self.service.authorized_types(
                 request, target, resource_types
             )
-            search_request = self.service.read_search_query(
+            search_request, position = self.service.read_search_query(
                 resource_types, request.query
             )
             with self.storage.operation():
-                total, resources = self.storage.search(authorized_types, search_request)
+                page = search_page(
+                    self.storage, authorized_types, search_request, position=position
+                )
             return self.service.search_response(
-                request.base_url, total, resources, search_request
+                request.base_url, resource_types, page, search_request
             )
 
     def search_with_body(self, request: ScimRequest) -> ScimResponse:
@@ -222,13 +244,15 @@ class ScimHandler:
             authorized_types = self.service.authorized_types(
                 request, target, resource_types
             )
-            search_request = self.service.read_search_body(
+            search_request, position = self.service.read_search_body(
                 resource_types, request.body, request.header("Content-Type")
             )
             with self.storage.operation():
-                total, resources = self.storage.search(authorized_types, search_request)
+                page = search_page(
+                    self.storage, authorized_types, search_request, position=position
+                )
             return self.service.search_response(
-                request.base_url, total, resources, search_request
+                request.base_url, resource_types, page, search_request
             )
 
     # -- Bulk -----------------------------------------------------------
@@ -353,9 +377,14 @@ class AsyncScimHandler:
 
     It calls the same steps of the same service, and awaits the storage
     between them.
+
+    :raises TypeError: When the configuration of the service announces
+        cursor pagination, and the storage does not
+        :attr:`~scim2_server.storage.AsyncScimStorage.supports_cursors`.
     """
 
     def __init__(self, service: ScimService, storage: AsyncScimStorage):
+        _check_cursors(service, storage)
         self.service = service
         self.storage = storage
 
@@ -536,15 +565,15 @@ class AsyncScimHandler:
             authorized_types = self.service.authorized_types(
                 request, target, resource_types
             )
-            search_request = self.service.read_search_query(
+            search_request, position = self.service.read_search_query(
                 resource_types, request.query
             )
             async with self.storage.operation():
-                total, resources = await self.storage.search(
-                    authorized_types, search_request
+                page = await async_search_page(
+                    self.storage, authorized_types, search_request, position=position
                 )
             return self.service.search_response(
-                request.base_url, total, resources, search_request
+                request.base_url, resource_types, page, search_request
             )
 
     async def search_with_body(self, request: ScimRequest) -> ScimResponse:
@@ -555,15 +584,15 @@ class AsyncScimHandler:
             authorized_types = self.service.authorized_types(
                 request, target, resource_types
             )
-            search_request = self.service.read_search_body(
+            search_request, position = self.service.read_search_body(
                 resource_types, request.body, request.header("Content-Type")
             )
             async with self.storage.operation():
-                total, resources = await self.storage.search(
-                    authorized_types, search_request
+                page = await async_search_page(
+                    self.storage, authorized_types, search_request, position=position
                 )
             return self.service.search_response(
-                request.base_url, total, resources, search_request
+                request.base_url, resource_types, page, search_request
             )
 
     # -- Bulk -----------------------------------------------------------

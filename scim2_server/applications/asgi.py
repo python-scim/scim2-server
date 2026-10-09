@@ -73,7 +73,9 @@ class ASGIApplication(BaseApplication):
             method=scope["method"],
             base_url=self.get_base_url(scope),
             path=self.split_path(self.get_path(scope)),
-            query=dict(parse_qsl(scope["query_string"].decode())),
+            query=dict(
+                parse_qsl(scope["query_string"].decode(), keep_blank_values=True)
+            ),
             headers=[
                 (name.decode(), value.decode()) for name, value in scope["headers"]
             ],

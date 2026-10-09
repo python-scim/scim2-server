@@ -20,13 +20,15 @@ scim2-server is for projects that need to:
 
 .. doctest::
 
+    >>> import os
     >>> from scim2_server.handler import ScimHandler
     >>> from scim2_server.memory import InMemoryStorage
     >>> from scim2_server.requests import ScimRequest
     >>> from scim2_server.service import ScimService
     >>> from scim2_server.utils import load_default_provider
 
-    >>> handler = ScimHandler(ScimService(load_default_provider()), InMemoryStorage())
+    >>> service = ScimService(load_default_provider(), secret=os.environ["SCIM_SECRET"])
+    >>> handler = ScimHandler(service, InMemoryStorage())
     >>> response = handler.handle(
     ...     ScimRequest(
     ...         "POST",

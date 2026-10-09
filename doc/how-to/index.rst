@@ -13,5 +13,6 @@ ends where an application resumes its own work, and names what it assumes.
    integrate-a-web-framework
    authenticate-the-clients
    deploy-the-server
+   page-with-cursors
    serve-the-me-endpoint
    serve-several-tenants

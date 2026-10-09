@@ -29,7 +29,7 @@ classifiers = [
 
 requires-python = ">= 3.11"
 dependencies = [
-    "scim2-models>=0.12.1",
+    "scim2-models>=0.12.2",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +38,9 @@ testing = [
 ]
 precis = [
     "precis-i18n>=1.1.2",
+]
+cursor = [
+    "cryptography>=50.0.1",
 ]
 
 [project.urls]
@@ -61,6 +64,7 @@ dev = [
     "scim2-client>=0.12.0",
     "scim2-tester>=0.5.1",
     "werkzeug>=3.0.3",
+    "cryptography>=50.0.1",
 ]
 doc = [
     "shibuya>=2024.5.15",
@@ -68,6 +72,7 @@ doc = [
     "sphinx-argparse>=0.6.1",
     "sphinx-design>=0.6.1",
     "sphinx-issues>=5.0.0",
+    "sphinxcontrib-mermaid>=2.1.1",
 ]
 
 [tool.uv]

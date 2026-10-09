@@ -27,7 +27,8 @@ Describe the service
 
 A :class:`~scim2_models.ScimProvider` describes the service: the schemas it knows, the resources
 it serves, and the features it supports. :func:`~scim2_server.utils.load_default_provider`
-serves the users and the groups of :rfc:`RFC 7643 <7643>`, with every feature:
+serves the users and the groups of :rfc:`RFC 7643 <7643>`, with every feature but the cursors
+of :doc:`how-to/page-with-cursors`:
 
 .. doctest::
 
@@ -70,17 +71,21 @@ Serve a request
 A :class:`~scim2_server.handler.ScimHandler` serves the SCIM requests with a
 :class:`~scim2_server.service.ScimService` and a storage.
 :class:`~scim2_server.memory.InMemoryStorage` keeps the resources in memory. A
-:class:`~scim2_server.requests.ScimRequest` holds a request, independent of any web framework:
+:class:`~scim2_server.requests.ScimRequest` holds a request, independent of any web framework.
+The service takes a secret, which protects the cursors of :doc:`how-to/page-with-cursors`. Read
+it from the configuration of the deployment, such as the ``SCIM_SECRET`` environment variable:
 
 .. doctest::
 
     >>> import json
+    >>> import os
     >>> from scim2_server.handler import ScimHandler
     >>> from scim2_server.memory import InMemoryStorage
     >>> from scim2_server.requests import ScimRequest
     >>> from scim2_server.service import ScimService
 
-    >>> handler = ScimHandler(ScimService(provider), InMemoryStorage())
+    >>> service = ScimService(provider, secret=os.environ["SCIM_SECRET"])
+    >>> handler = ScimHandler(service, InMemoryStorage())
     >>> member = {
     ...     "schemas": [
     ...         "urn:ietf:params:scim:schemas:core:2.0:User",

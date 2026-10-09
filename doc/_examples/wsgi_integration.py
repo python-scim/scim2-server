@@ -1,4 +1,5 @@
 import json
+import os
 from urllib.parse import parse_qsl
 from wsgiref.util import application_uri
 
@@ -11,7 +12,7 @@ from scim2_server.responses import ScimResponse
 from scim2_server.service import ScimService
 from scim2_server.utils import load_default_provider
 
-service = ScimService(load_default_provider())
+service = ScimService(load_default_provider(), secret=os.environ["SCIM_SECRET"])
 handler = ScimHandler(service, InMemoryStorage())
 
 

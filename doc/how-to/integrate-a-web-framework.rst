@@ -26,12 +26,15 @@ over an :class:`~scim2_server.storage.AsyncScimStorage`:
 
       .. doctest::
 
+          >>> import os
           >>> from scim2_server.handler import ScimHandler
           >>> from scim2_server.memory import InMemoryStorage
           >>> from scim2_server.service import ScimService
           >>> from scim2_server.utils import load_default_provider
 
-          >>> service = ScimService(load_default_provider())
+          >>> service = ScimService(
+          ...     load_default_provider(), secret=os.environ["SCIM_SECRET"]
+          ... )
           >>> handler = ScimHandler(service, InMemoryStorage())
 
    .. tab-item:: Async
@@ -39,19 +42,23 @@ over an :class:`~scim2_server.storage.AsyncScimStorage`:
 
       .. doctest::
 
+          >>> import os
           >>> from scim2_server.handler import AsyncScimHandler
           >>> from scim2_server.memory import AsyncInMemoryStorage
           >>> from scim2_server.service import ScimService
           >>> from scim2_server.utils import load_default_provider
 
-          >>> service = ScimService(load_default_provider())
+          >>> service = ScimService(
+          ...     load_default_provider(), secret=os.environ["SCIM_SECRET"]
+          ... )
           >>> handler = AsyncScimHandler(service, AsyncInMemoryStorage())
 
 The handler needs two objects:
 
 - the :class:`~scim2_server.service.ScimService` applies the SCIM rules to the resources of a
   :class:`~scim2_models.ScimProvider`. This provider describes the users and the groups of
-  :rfc:`RFC 7643 <7643>`. Keep a reference to the service, because the error handler of
+  :rfc:`RFC 7643 <7643>`. The secret protects the cursors of :doc:`page-with-cursors`. Read it from the
+  configuration of the deployment. Keep a reference to the service, because the error handler of
   `Return the response`_ uses it.
 - the storage reads and writes the resources. Replace the in-memory storage with the storage of
   the application.

@@ -1,6 +1,7 @@
 import asyncio
 import importlib.resources
 import json
+import os
 
 import httpx2
 import pytest
@@ -13,6 +14,13 @@ from scim2_server.memory import InMemoryStorage
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
+
+SECRET = "a secret every worker shares"
+
+# The applications read the secret of their service from the environment, and
+# so do the examples of the documentation, as a deployment does.
+os.environ.setdefault("SCIM2_SERVER_SECRET", SECRET)
+os.environ.setdefault("SCIM_SECRET", SECRET)
 
 
 @pytest.fixture(scope="session")

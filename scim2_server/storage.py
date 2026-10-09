@@ -5,7 +5,9 @@ from abc import abstractmethod
 from contextlib import AbstractAsyncContextManager
 from contextlib import AbstractContextManager
 from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import Any
+from typing import cast
 
 from scim2_models import Resource
 from scim2_models import ResourceType
@@ -13,20 +15,19 @@ from scim2_models import ResponseParameters
 from scim2_models import SearchRequest
 
 
-def takes_response_parameters(storage_class: type) -> bool:
-    """Tell whether the ``get`` method of a storage accepts ``response_parameters``, and warn when it does not."""
-    parameters = inspect.signature(storage_class.get).parameters.values()  # type: ignore[attr-defined]
+def _accepts(storage_class: type, method: str, parameter: str) -> bool:
+    """Tell whether a method of a storage accepts a keyword argument, and warn when it does not."""
+    parameters = inspect.signature(getattr(storage_class, method)).parameters.values()
     if any(
-        parameter.name == "response_parameters"
-        or parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters
+        candidate.name == parameter or candidate.kind is inspect.Parameter.VAR_KEYWORD
+        for candidate in parameters
     ):
         return True
     warnings.warn(
-        f"{storage_class.__qualname__}.get should accept a response_parameters "
+        f"{storage_class.__qualname__}.{method} should accept a {parameter} "
         "keyword argument. scim2-server 0.9 will require it.",
         DeprecationWarning,
-        # takes_response_parameters, __init_subclass__, ABCMeta.__new__, then the class statement
+        # _accepts, __init_subclass__, ABCMeta.__new__, then the class statement
         stacklevel=4,
     )
     return False
@@ -40,6 +41,70 @@ def projection(
     if not storage._get_takes_response_parameters:
         return {}
     return {"response_parameters": response_parameters}
+
+
+@dataclass
+class SearchPage:
+    """A page of found resources, as :meth:`ScimStorage.search` returns it."""
+
+    total: int | None
+    """The number of matching resources, on every page.
+
+    It may be :data:`None` when the resources are paged with a cursor
+    (:rfc:`RFC 9865 §2 <9865#section-2>`).
+    """
+
+    resources: list[Resource[Any]]
+    """The resources of the page."""
+
+    next: Any = None
+    """The position of the next page, or :data:`None` on the last page."""
+
+    previous: Any = None
+    """The position of the previous page, or :data:`None` on the first page."""
+
+
+def search_page(
+    storage: "ScimStorage",
+    resource_types: list[ResourceType],
+    search_request: SearchRequest[Any],
+    position: Any,
+) -> SearchPage:
+    """Search a storage, whether its search method accepts a position or not.
+
+    This function goes away with the deprecated search methods in
+    scim2-server 0.9.
+    """
+    if storage._search_takes_position:
+        result = storage.search(resource_types, search_request, position=position)
+    else:
+        result = storage.search(resource_types, search_request)
+    return _page_of(result)
+
+
+async def async_search_page(
+    storage: "AsyncScimStorage",
+    resource_types: list[ResourceType],
+    search_request: SearchRequest[Any],
+    position: Any,
+) -> SearchPage:
+    """Search an asynchronous storage, as search_page does.
+
+    This function goes away with the deprecated search methods in
+    scim2-server 0.9.
+    """
+    if storage._search_takes_position:
+        result = await storage.search(resource_types, search_request, position=position)
+    else:
+        result = await storage.search(resource_types, search_request)
+    return _page_of(result)
+
+
+def _page_of(result: Any) -> SearchPage:
+    """Return the page a search returned, as a deprecated search returns the number of resources and the page."""
+    if isinstance(result, tuple):
+        return SearchPage(*result)
+    return cast(SearchPage, result)
 
 
 class ScimStorage(ABC):
@@ -72,11 +137,21 @@ class ScimStorage(ABC):
       calling the storage.
     """
 
+    supports_cursors: bool = False
+    """Whether :meth:`search` pages the resources with cursors that give stable pages.
+
+    Set it to :data:`True` once :meth:`search` follows the rules of the
+    cursors. The server refuses to start when its configuration announces
+    cursor pagination and the storage does not support it.
+    """
+
     _get_takes_response_parameters = True
+    _search_takes_position = True
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        cls._get_takes_response_parameters = takes_response_parameters(cls)
+        cls._get_takes_response_parameters = _accepts(cls, "get", "response_parameters")
+        cls._search_takes_position = _accepts(cls, "search", "position")
 
     @abstractmethod
     def get(
@@ -107,9 +182,13 @@ class ScimStorage(ABC):
 
     @abstractmethod
     def search(
-        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
-    ) -> tuple[int, list[Resource[Any]]]:
-        """Return the number of matching resources, and one page of them.
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        *,
+        position: Any = None,
+    ) -> SearchPage:
+        """Return one page of the matching resources, and their number.
 
         The search request is already validated, and its ``count`` is already
         bounded by the ``maxResults`` of the server. The storage filters, sorts
@@ -119,9 +198,32 @@ class ScimStorage(ABC):
         An attribute that a resource type does not declare matches none of its
         resources (:rfc:`RFC 7644 §3.4.2.1 <7644#section-3.4.2.1>`).
 
+        A :attr:`~scim2_models.SearchRequest.start_index` pages the resources
+        by index. A :attr:`~scim2_models.SearchRequest.cursor` that is not
+        :data:`None` pages them with a cursor (:rfc:`RFC 9865 <9865>`), when
+        the storage :attr:`supports_cursors`. The storage then returns the
+        ``next`` and ``previous`` positions of the page, as values that JSON
+        can hold. The server hides them in the cursors it gives the client,
+        and passes them back as ``position``. ``position`` is :data:`None` on
+        the first page.
+
+        The cursors give stable pages. A position holds the sort value and
+        the identifier of the last resource of the page, or of the first one
+        for the previous page. A resource that exists during the whole
+        paging, and whose sort value does not change, is returned exactly
+        once. A resource created or deleted meanwhile is returned or not,
+        depending on where it sorts.
+
+        A ``search`` method without ``position`` is deprecated, and raises a
+        :class:`DeprecationWarning`. It returns the number of matching
+        resources and the page, and pages by index only. scim2-server 0.9 will
+        require ``position``.
+
         :raises ~scim2_models.InvalidFilterException: When the storage cannot
             evaluate the filter. Filtering the page afterwards would make
             ``totalResults`` and the paging wrong.
+        :raises ~scim2_models.InvalidCursorException: When the storage cannot
+            read ``position``.
         :raises ~scim2_models.NotImplementedException: When the storage does
             not support searching several resource types at once.
         """
@@ -192,11 +294,16 @@ class AsyncScimStorage(ABC):
     which :class:`~scim2_server.testing.AsyncScimStorageContract` checks.
     """
 
+    supports_cursors: bool = False
+    """Whether :meth:`search` pages the resources with cursors that give stable pages. See :attr:`ScimStorage.supports_cursors`."""
+
     _get_takes_response_parameters = True
+    _search_takes_position = True
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        cls._get_takes_response_parameters = takes_response_parameters(cls)
+        cls._get_takes_response_parameters = _accepts(cls, "get", "response_parameters")
+        cls._search_takes_position = _accepts(cls, "search", "position")
 
     @abstractmethod
     async def get(
@@ -210,9 +317,13 @@ class AsyncScimStorage(ABC):
 
     @abstractmethod
     async def search(
-        self, resource_types: list[ResourceType], search_request: SearchRequest[Any]
-    ) -> tuple[int, list[Resource[Any]]]:
-        """Return the number of matching resources, and one page of them. See :meth:`ScimStorage.search`."""
+        self,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+        *,
+        position: Any = None,
+    ) -> SearchPage:
+        """Return one page of the matching resources, and their number. See :meth:`ScimStorage.search`."""
 
     @abstractmethod
     async def create(

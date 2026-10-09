@@ -13,6 +13,8 @@ from scim2_models import User
 
 from scim2_server.service import ScimService
 
+from .conftest import SECRET
+
 BASE_URL = "https://scim.example.com/v2"
 
 
@@ -128,7 +130,10 @@ class Badge(Resource):
 def test_references_outside_complex_attributes_are_resolved():
     """Single and multi-valued reference attributes are resolved, other references are kept."""
     service = ScimService(
-        ScimProvider(models=[Badge], resource_types=[ResourceType.from_resource(Badge)])
+        ScimProvider(
+            models=[Badge], resource_types=[ResourceType.from_resource(Badge)]
+        ),
+        secret=SECRET,
     )
     badge = Badge(
         id="1",

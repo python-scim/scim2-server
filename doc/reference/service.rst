@@ -7,3 +7,6 @@ The SCIM protocol, without input or output.
    :members:
 
 .. autofunction:: scim2_server.service.is_json_media_type
+
+.. autoclass:: scim2_server.cursor.Cursors
+   :members:

@@ -1,4 +1,5 @@
 import json
+import os
 from urllib.parse import parse_qsl
 
 from scim2_models import SCIMException
@@ -10,7 +11,7 @@ from scim2_server.responses import ScimResponse
 from scim2_server.service import ScimService
 from scim2_server.utils import load_default_provider
 
-service = ScimService(load_default_provider())
+service = ScimService(load_default_provider(), secret=os.environ["SCIM_SECRET"])
 handler = AsyncScimHandler(service, AsyncInMemoryStorage())
 
 

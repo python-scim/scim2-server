@@ -20,6 +20,7 @@ from scim2_models import default_comparison_key
 
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
+from scim2_server.storage import SearchPage
 from scim2_server.testing import AsyncScimStorageContract
 from scim2_server.testing import ScimStorageContract
 from scim2_server.utils import load_default_service_provider_config
@@ -272,21 +273,18 @@ def test_a_filter_bound_to_no_model_is_resolved_against_the_stored_resources(
         storage.create(user_type, User(user_name=user_name))
     resource_types = list(scim_provider.resource_types) if root else [user_type]
 
-    total, resources = storage.search(
-        resource_types, SearchRequest(filter='userName eq "bob"')
-    )
+    page = storage.search(resource_types, SearchRequest(filter='userName eq "bob"'))
 
-    assert total == 1
-    assert resources[0].user_name == "bob"
+    assert page.total == 1
+    assert page.resources[0].user_name == "bob"
 
 
 def test_an_unbound_filter_without_resource(user_type):
     """With no stored resource, an unbound filter has nothing to be resolved against nor to match."""
     storage = InMemoryStorage()
-    assert storage.search([user_type], SearchRequest(filter='userName eq "bob"')) == (
-        0,
-        [],
-    )
+    assert storage.search(
+        [user_type], SearchRequest(filter='userName eq "bob"')
+    ) == SearchPage(0, [])
 
 
 def test_a_resource_type_named_apart_from_its_id(static_data):
@@ -304,6 +302,6 @@ def test_a_resource_type_named_apart_from_its_id(static_data):
     assert created.meta.resource_type == "User"
 
     assert storage.get(resource_type, created.id).user_name == "bjensen"
-    assert storage.search([resource_type], SearchRequest())[0] == 1
+    assert storage.search([resource_type], SearchRequest()).total == 1
     with pytest.raises(UniquenessException):
         storage.create(resource_type, User(user_name="bjensen"))

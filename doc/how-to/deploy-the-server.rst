@@ -126,6 +126,7 @@ root URL of the SCIM endpoints, the resource type, and the identifier of the res
 
 .. doctest::
 
+    >>> import os
     >>> from scim2_server.service import ScimService
 
     >>> class PublicService(ScimService):
@@ -147,9 +148,8 @@ Pass the service to the application, built upon the same provider:
           >>> from scim2_server.utils import load_default_provider
 
           >>> provider = load_default_provider()
-          >>> app = WSGIApplication(
-          ...     InMemoryStorage(), provider, service=PublicService(provider)
-          ... )
+          >>> service = PublicService(provider, secret=os.environ["SCIM_SECRET"])
+          >>> app = WSGIApplication(InMemoryStorage(), provider, service=service)
 
    .. tab-item:: Async
       :sync: async
@@ -159,22 +159,19 @@ Pass the service to the application, built upon the same provider:
           >>> from scim2_server.applications.asgi import ASGIApplication
           >>> from scim2_server.memory import AsyncInMemoryStorage
 
-          >>> async_app = ASGIApplication(
-          ...     AsyncInMemoryStorage(), provider, service=PublicService(provider)
-          ... )
+          >>> async_app = ASGIApplication(AsyncInMemoryStorage(), provider, service=service)
 
 A created resource then carries the URL of the service:
 
 .. doctest::
 
-    >>> from werkzeug.test import Client
+    >>> from scim2_client.engines.wsgi import WSGISCIMClient
+    >>> from scim2_models import User
 
-    >>> response = Client(app).post(
-    ...     "/v2/Users", json={"userName": "bjensen"}, content_type="application/scim+json"
-    ... )
-    >>> response.headers["Location"] == f"https://scim.example/Users/{response.json['id']}"
-    True
-    >>> response.json["meta"]["location"] == response.headers["Location"]
+    >>> scim_client = WSGISCIMClient(app, base_url="http://localhost/v2")
+    >>> scim_client.discover()
+    >>> user = scim_client.create(User(user_name="bjensen"))
+    >>> user.meta.location == f"https://scim.example/Users/{user.id}"
     True
 
 The routes of the server do not change: they stay those of

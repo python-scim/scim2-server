@@ -81,7 +81,9 @@ class WSGIApplication(BaseApplication):
             method=environ["REQUEST_METHOD"],
             base_url=self.get_base_url(environ),
             path=self.split_path(environ.get("PATH_INFO", "")),
-            query=dict(parse_qsl(environ.get("QUERY_STRING", ""))),
+            query=dict(
+                parse_qsl(environ.get("QUERY_STRING", ""), keep_blank_values=True)
+            ),
             headers=headers,
         )
         request.body = self.read_body(environ, request)
