@@ -1,3 +1,5 @@
+<img alt="python-scim logo" src="https://raw.githubusercontent.com/python-scim/.github/refs/heads/main/python-scim.svg" height="72" align="right">
+
 # scim2-server
 
 A Python library that serves the SCIM protocol over any storage, built upon
