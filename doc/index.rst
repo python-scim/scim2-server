@@ -8,11 +8,9 @@ resources, in a database or anywhere else.
 
 scim2-server is for projects that need to:
 
-- serve a standalone SCIM server: the :doc:`overview` builds one, and
-  :doc:`how-to/deploy-the-server` puts it in production;
-- add SCIM to an existing application, with SCIM models that describe its data:
-  :doc:`how-to/serve-an-existing-data-model` maps its tables to SCIM resources, and
-  :doc:`how-to/integrate-a-web-framework` serves them from its web framework;
+- add SCIM to a web application: :doc:`how-to/integrate-a-web-framework` serves SCIM from its
+  web framework, and :doc:`how-to/serve-an-existing-data-model` maps its tables to SCIM
+  resources;
 - test a SCIM client against a working server: the :doc:`scim2-server command <reference/cli>`
   serves one from the command line or from a container, and
   `pytest-scim2-server <https://github.com/pytest-dev/pytest-scim2-server>`_ serves one as a
@@ -41,20 +39,24 @@ scim2-server is for projects that need to:
     >>> response.status, response.headers["Location"]
     (<HTTPStatus.CREATED: 201>, 'https://scim.example/v2/Users/...')
 
-The library has four layers. An application uses as many as it needs:
+scim2-server covers four themes. An application uses the ones it needs, and the guides, the
+explanations and the reference follow the same themes:
 
-- a service, :class:`~scim2_server.service.ScimService`, which applies the rules of SCIM,
-  independently of any web framework;
-- a handler, :class:`~scim2_server.handler.ScimHandler`, or
-  :class:`~scim2_server.handler.AsyncScimHandler` for an asynchronous application, which turns a
+- **HTTP**: a handler, :class:`~scim2_server.handler.ScimHandler` or
+  :class:`~scim2_server.handler.AsyncScimHandler`, turns a
   :class:`~scim2_server.requests.ScimRequest` into a
-  :class:`~scim2_server.responses.ScimResponse`;
-- a storage, :class:`~scim2_server.storage.ScimStorage`, which reads and writes the resources,
-  with :class:`~scim2_server.memory.InMemoryStorage` for tests, debugging and demos;
-- an integration, such as :class:`~scim2_server.applications.wsgi.WSGIApplication` or
-  :class:`~scim2_server.applications.asgi.ASGIApplication`, which need no other dependency.
-
-The ``scim2-server`` command serves a test server.
+  :class:`~scim2_server.responses.ScimResponse`. An integration turns the requests of a web
+  framework into :class:`~scim2_server.requests.ScimRequest`.
+  :class:`~scim2_server.applications.wsgi.WSGIApplication` and
+  :class:`~scim2_server.applications.asgi.ASGIApplication` serve SCIM without a framework, for
+  tests and demos.
+- **Service**: :class:`~scim2_server.service.ScimService` applies the rules of SCIM,
+  independently of any web framework.
+- **Storage**: a :class:`~scim2_server.storage.ScimStorage` reads and writes the resources.
+  :class:`~scim2_server.memory.InMemoryStorage` keeps them in memory, for tests, debugging and
+  demos.
+- **Test server**: the :doc:`scim2-server command <reference/cli>` serves a SCIM server from the
+  command line, for the tests of a SCIM client in any language.
 
 .. code-block:: shell
 
@@ -74,16 +76,23 @@ the service and the storage, the handling of concurrent writes, and the bulk req
 
 :doc:`Reference <reference/index>` lists the public API.
 
-:doc:`Test server <reference/cli>` runs a SCIM server from the command line, for the tests of a SCIM
-client in any language.
+.. toctree::
+    :hidden:
+    :titlesonly:
+
+    Overview <overview>
 
 .. toctree::
     :maxdepth: 2
     :hidden:
 
-    Overview <overview>
     How-to guides <how-to/index>
     Explanation <explanation/index>
     Reference <reference/index>
+
+.. toctree::
+    :hidden:
+    :titlesonly:
+
     Contributing <contributing>
     Changelog <changelog>

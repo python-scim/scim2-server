@@ -290,6 +290,7 @@ application with a synchronous handler, and as an ASGI application with an async
       .. literalinclude:: ../_examples/asgi_integration.py
          :language: python
 
-scim2-server provides the complete version of these two applications:
-:class:`~scim2_server.applications.wsgi.WSGIApplication` and :class:`~scim2_server.applications.asgi.ASGIApplication`. Their
-hooks observe or change each request, without a framework.
+scim2-server provides the complete version of these two applications, for tests and demos:
+:class:`~scim2_server.applications.wsgi.WSGIApplication` and
+:class:`~scim2_server.applications.asgi.ASGIApplication`. Their hooks observe or change each
+request, without a framework.

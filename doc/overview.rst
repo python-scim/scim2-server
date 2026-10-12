@@ -148,7 +148,8 @@ Serve over HTTP
 
 :class:`~scim2_server.applications.wsgi.WSGIApplication` and
 :class:`~scim2_server.applications.asgi.ASGIApplication` serve a storage and a provider over
-HTTP, with no other dependency. The ASGI application takes an asynchronous storage, such as
+HTTP, with no other dependency. They are for tests and demos: an application serves SCIM from its
+web framework. The ASGI application takes an asynchronous storage, such as
 :class:`~scim2_server.memory.AsyncInMemoryStorage`:
 
 .. tab-set::
@@ -260,8 +261,7 @@ In another terminal, read the configuration of the service:
               }
           }
 
-:doc:`how-to/integrate-a-web-framework` serves SCIM from the web framework of an application,
-and :doc:`how-to/deploy-the-server` serves the applications in production.
+:doc:`how-to/integrate-a-web-framework` serves SCIM from the web framework of an application.
 
 Keep the resources in a database
 --------------------------------

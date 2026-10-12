@@ -186,6 +186,8 @@ html_baseurl = "https://scim2-server.readthedocs.io"
 html_logo = "_static/python-scim.svg"
 html_theme_options = {
     "globaltoc_expand_depth": 2,
+    "toctree_titles_only": False,
+    "toctree_maxdepth": 3,
     "accent_color": "violet",
     "github_url": "https://github.com/python-scim/scim2-server",
     "mastodon_url": "https://toot.aquilenet.fr/@yaal",

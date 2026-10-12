@@ -22,6 +22,11 @@ whatever the case of its ASCII letters:
    :start-at: TABLE =
    :end-before: class SQLiteStorage
 
+A web server often runs the application in several processes, and each process has its own
+storage. Keep the resources in a database that every process reaches: the processes then serve
+the same resources. :class:`~scim2_server.memory.InMemoryStorage` keeps them in its process, so
+a server over it runs a single process.
+
 Keep the resources
 ------------------
 
@@ -263,8 +268,8 @@ A search receives a ``position`` too. It locates a page when a cursor pages the 
 :class:`~scim2_server.storage.SearchPage`, and the server passes them back for the next request.
 The cursors must give stable pages, even when resources are created or deleted between two pages:
 :doc:`../explanation/pagination` explains why. A storage that gives them sets
-:attr:`~scim2_server.storage.ScimStorage.supports_cursors`, and :doc:`page-with-cursors`
-explains how. The storage of the example pages by index only.
+:attr:`~scim2_server.storage.ScimStorage.supports_cursors`, and
+:doc:`support-cursors-in-a-storage` explains how. The storage of the example pages by index only.
 
 Search in a database
 --------------------
@@ -278,7 +283,7 @@ The search of the example reads every resource. A database storage translates th
   :attr:`~scim2_models.SearchRequest.start_index` and :attr:`~scim2_models.SearchRequest.count`
   give the order and the page;
 - when :attr:`~scim2_models.SearchRequest.cursor` is not ``None``, a cursor pages the resources
-  from ``position``, as :doc:`page-with-cursors` explains;
+  from ``position``, as :doc:`support-cursors-in-a-storage` explains;
 - a filter the storage cannot translate raises :class:`~scim2_models.InvalidFilterException`.
   The server then answers 400. Do not filter in Python after the query has paged the results:
   ``totalResults`` would be wrong.

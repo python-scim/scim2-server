@@ -4,7 +4,7 @@ Paging the results
 This page explains what a client gets when it reads a large collection page by page, and why
 scim2-server pages with ``startIndex`` and with cursors the way it does. The steps to announce
 the cursors are in :doc:`../how-to/page-with-cursors`, and the rules a storage follows are in
-:doc:`../how-to/write-a-storage`.
+:doc:`../how-to/support-cursors-in-a-storage`.
 
 What changes between two pages
 ------------------------------

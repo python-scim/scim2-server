@@ -1,7 +1,9 @@
 WSGI and ASGI applications
 ==========================
 
-Two integrations with no dependency, for a WSGI or an ASGI server. Their hooks take a
+Two integrations with no dependency, for a WSGI or an ASGI server. They serve SCIM for tests and
+demos, such as the :doc:`test server <cli>`. An application serves SCIM from its web framework, as
+:doc:`../how-to/integrate-a-web-framework` explains. Their hooks take a
 :class:`~scim2_server.requests.ScimRequest`, and return a
 :class:`~scim2_server.responses.ScimResponse`.
 
