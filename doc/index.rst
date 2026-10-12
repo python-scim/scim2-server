@@ -8,9 +8,9 @@ resources, in a database or anywhere else.
 
 scim2-server is for projects that need to:
 
-- add SCIM to a web application: :doc:`how-to/integrate-a-web-framework` serves SCIM from its
-  web framework, and :doc:`how-to/serve-an-existing-data-model` maps its tables to SCIM
-  resources;
+- add SCIM to a web application: :doc:`how-to/integrate-a-web-framework` explains how to
+  serve SCIM from its web framework, and :doc:`how-to/serve-an-existing-data-model` how to map
+  its tables to SCIM resources;
 - test a SCIM client against a working server: the :doc:`scim2-server command <reference/cli>`
   serves one from the command line or from a container, and
   `pytest-scim2-server <https://github.com/pytest-dev/pytest-scim2-server>`_ serves one as a

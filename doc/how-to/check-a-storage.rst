@@ -3,7 +3,7 @@ Check a storage
 
 Use this guide to check that a storage follows the rules of
 :class:`~scim2_server.storage.ScimStorage`, with the test suite scim2-server provides. It
-assumes a storage written with :doc:`write-a-storage`, and tests run with
+assumes a storage written as :doc:`write-a-storage` explains, and tests run with
 :doc:`pytest <pytest:index>`.
 
 The suite checks what the method signatures do not tell: the copies, the 404 and 412 errors,

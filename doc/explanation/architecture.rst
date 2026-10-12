@@ -115,5 +115,5 @@ scim2-models validates and serializes the payloads. It has no notion of a storag
 of a server. scim2-server builds the server on top of it: the parts that need to know where the
 resources live and how they are served.
 
-The :doc:`storage` page explains the rules of the storage, and :doc:`bulk` how the handlers run
-a bulk request.
+:doc:`storage` explains the rules of the storage. :doc:`bulk` explains how the handlers run a
+bulk request.

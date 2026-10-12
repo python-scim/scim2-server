@@ -27,8 +27,8 @@ Describe the service
 
 A :class:`~scim2_models.ScimProvider` describes the service: the schemas it knows, the resources
 it serves, and the features it supports. :func:`~scim2_server.utils.load_default_provider`
-serves the users and the groups of :rfc:`RFC 7643 <7643>`, with every feature but the cursors
-of :doc:`how-to/page-with-cursors`:
+serves the users and the groups of :rfc:`RFC 7643 <7643>`, with every feature but the
+:doc:`cursors <how-to/page-with-cursors>`:
 
 .. doctest::
 
@@ -72,8 +72,8 @@ A :class:`~scim2_server.handler.ScimHandler` serves the SCIM requests with a
 :class:`~scim2_server.service.ScimService` and a storage.
 :class:`~scim2_server.memory.InMemoryStorage` keeps the resources in memory. A
 :class:`~scim2_server.requests.ScimRequest` holds a request, independent of any web framework.
-The service takes a secret, which protects the cursors of :doc:`how-to/page-with-cursors`. Read
-it from the configuration of the deployment, such as the ``SCIM_SECRET`` environment variable:
+The service takes a secret, which protects the :doc:`cursors <how-to/page-with-cursors>`.
+Read it from the configuration of the deployment, such as the ``SCIM_SECRET`` environment variable:
 
 .. doctest::
 
@@ -261,7 +261,8 @@ In another terminal, read the configuration of the service:
               }
           }
 
-:doc:`how-to/integrate-a-web-framework` serves SCIM from the web framework of an application.
+:doc:`how-to/integrate-a-web-framework` explains how to serve SCIM from the web framework of an
+application.
 
 Keep the resources in a database
 --------------------------------
@@ -286,8 +287,9 @@ methods. The server validates the requests and applies them before it calls the 
 
         def search(self, resource_types, search_request): ...
 
-:doc:`how-to/write-a-storage` writes a complete storage over a SQLite table, and
-:doc:`how-to/serve-an-existing-data-model` serves the tables that an application already has.
+:doc:`how-to/write-a-storage` explains how to keep the resources in a SQLite table, and
+:doc:`how-to/serve-an-existing-data-model` how to serve the tables that an application already
+has.
 
 Check a server
 --------------

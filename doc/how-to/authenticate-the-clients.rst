@@ -3,7 +3,7 @@ Authenticate and authorize the clients
 
 Use this guide to secure the SCIM endpoints of an application: refuse the unknown clients, and
 limit what each known client may do. It is meant for developers who serve scim2-server from a web
-application. It assumes an integration built with :doc:`integrate-a-web-framework`, and a way to
+application. It assumes an integration built as :doc:`integrate-a-web-framework` explains, and a way to
 validate the credentials of the clients, such as the tokens of
 `Authlib <https://docs.authlib.org>`_.
 

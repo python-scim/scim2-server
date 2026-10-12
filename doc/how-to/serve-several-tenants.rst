@@ -2,7 +2,8 @@ Serve several tenants
 =====================
 
 Use this guide to serve several independent sets of resources from a single application, one
-per tenant. It assumes an integration built with :doc:`integrate-a-web-framework`.
+per tenant. It assumes an integration built as :doc:`integrate-a-web-framework`
+explains.
 
 Each tenant has its own resources: uniqueness, filters and paging only consider the resources
 of the tenant. The schemas, the resource types and the service are shared. Give each tenant its

@@ -2,9 +2,9 @@ Serve the /Me endpoint
 ======================
 
 Use this guide to serve ``/Me``, the alias of the resource of the authenticated client
-(:rfc:`RFC 7644 §3.11 <7644#section-3.11>`). It assumes an integration built with
-:doc:`integrate-a-web-framework`, and clients authenticated with
-:doc:`authenticate-the-clients`.
+(:rfc:`RFC 7644 §3.11 <7644#section-3.11>`). It assumes an integration built as
+:doc:`integrate-a-web-framework` explains, and clients authenticated as
+:doc:`authenticate-the-clients` explains.
 
 By default, ``/Me`` answers 501. A request on ``/Me`` acts on a resource that depends on the
 client: a ``User`` for a person, or another type, such as a device. The application tells which

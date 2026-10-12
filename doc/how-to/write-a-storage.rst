@@ -2,7 +2,7 @@ Write a storage
 ===============
 
 Use this guide to keep the SCIM resources in a database table of their own. It assumes a
-:class:`~scim2_models.ScimProvider` that describes the service, such as the one of
+:class:`~scim2_models.ScimProvider` that describes the service, such as the one of the
 :doc:`../overview`. To serve the data that an application already keeps in its own tables, follow
 :doc:`serve-an-existing-data-model` after this guide.
 

@@ -57,8 +57,8 @@ The handler needs two objects:
 
 - the :class:`~scim2_server.service.ScimService` applies the SCIM rules to the resources of a
   :class:`~scim2_models.ScimProvider`. This provider describes the users and the groups of
-  :rfc:`RFC 7643 <7643>`. The secret protects the cursors of :doc:`page-with-cursors`. Read it from the
-  configuration of the deployment. Keep a reference to the service, because the error handler of
+  :rfc:`RFC 7643 <7643>`. The secret protects the :doc:`cursors <page-with-cursors>`. Read it from
+  the configuration of the deployment. Keep a reference to the service, because the error handler of
   `Return the response`_ uses it.
 - the storage reads and writes the resources. Replace the in-memory storage with the storage of
   the application.
