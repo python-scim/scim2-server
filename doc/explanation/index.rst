@@ -2,9 +2,9 @@ Explanation
 ===========
 
 These pages give the reasons behind the design of scim2-server: how the work is split between
-its layers, how it runs bulk requests, how it pages the results, and how it writes resources
-safely. They are written to be read away from the keyboard, rather than consulted while
-completing a task.
+its layers, how it runs bulk requests, how it pages the results, how it writes resources safely,
+and how a storage searches a database. They are written to be read away from the keyboard,
+rather than consulted while completing a task.
 
 Service
 -------
@@ -23,3 +23,4 @@ Storage
    :maxdepth: 1
 
    storage
+   search

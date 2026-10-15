@@ -284,9 +284,15 @@ The search of the example reads every resource. A database storage translates th
   give the order and the page;
 - when :attr:`~scim2_models.SearchRequest.cursor` is not ``None``, a cursor pages the resources
   from ``position``, as :doc:`support-cursors-in-a-storage` explains;
-- a filter the storage cannot translate raises :class:`~scim2_models.InvalidFilterException`.
-  The server then answers 400. Do not filter in Python after the query has paged the results:
+- a filter the storage cannot translate raises :class:`~scim2_models.InvalidFilterException`,
+  and a sort it cannot translate raises :class:`~scim2_models.InvalidPathException`. The server
+  then answers 400. Do not filter in Python after the query has paged the results:
   ``totalResults`` would be wrong.
+
+:doc:`scim2_models:how-to/write-a-filter-transpiler` shows how to turn a filter into a ``WHERE``
+clause. A direct translation gives wrong answers on missing values, multi-valued attributes, case
+and ``NULL`` in a sort: :doc:`../explanation/search` lists these traps. The storage contract of
+:doc:`check-a-storage` compares the answers of the storage with the rules of SCIM.
 
 The server already refuses a filter or a sort that its
 :class:`~scim2_models.ServiceProviderConfig` does not announce. A provider without ``config``
