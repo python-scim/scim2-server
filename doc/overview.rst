@@ -305,12 +305,13 @@ without a network:
 .. doctest::
 
     >>> from scim2_client.engines.wsgi import WSGISCIMClient
+    >>> from scim2_tester import Status
     >>> from scim2_tester import check_server
 
     >>> scim_client = WSGISCIMClient(app, base_url="http://localhost/v2")
     >>> scim_client.discover()
     >>> results = check_server(scim_client)
-    >>> [result.title for result in results if result.status.name in ("ERROR", "CRITICAL")]
+    >>> [result.title for result in results if result.status in (Status.ERROR, Status.CRITICAL)]
     []
 
 A storage has its own test suite. Subclass
