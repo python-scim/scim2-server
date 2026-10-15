@@ -116,23 +116,9 @@ For a storage that cannot search several resource types at once, set
     SKIPPED [9] scim2_server/testing.py:215: The service does not support cursor pagination
     ======================= 94 passed, 12 skipped in 6.79s =========================
 
-Check the filters and the sorts
--------------------------------
-
-A storage that searches a database translates the filters and the sorts into queries. A direct
-translation answers another question on missing values, multi-valued attributes, case or
-``NULL`` in a sort: :doc:`../explanation/search` lists these traps.
-
-The suite searches a few users made to fall into them, with each filter and each sort of a list.
-It compares the resources the storage returns with the ones
-:meth:`ScimFilter.match <scim2_models.ScimFilter.match>` keeps, and their order with the one
-:meth:`SearchRequest.sort <scim2_models.SearchRequest.sort>` gives. Resources with the same sort
-value may come in any order.
-
-A storage refuses a filter it cannot translate with
-:class:`~scim2_models.InvalidFilterException`, and a sort with
-:class:`~scim2_models.InvalidPathException`. The suite skips the filters and the sorts the storage
-refuses, and checks the answer of the others:
+A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
+and a sort with :class:`~scim2_models.InvalidPathException`. The suite skips the filters and the
+sorts the storage refuses, and checks the others:
 
 .. code-block:: console
 
@@ -140,7 +126,7 @@ refuses, and checks the answer of the others:
     SKIPPED [11] scim2_server/testing.py:653: The storage refuses the search: Cannot filter on 'title'
     SKIPPED [2] scim2_server/testing.py:653: The storage refuses the search: Cannot sort on 'title'
 
-The users carry the attributes of the ``User`` resource type and of its enterprise extension. For
-a storage that does not store some of them, override
-:meth:`~scim2_server.testing.ScimStorageContract.search_users`, and return the users without these
-attributes.
+The filters and the sorts search users with the attributes of the ``User`` resource type and of
+its enterprise extension. For a storage that does not store some of them, override
+:meth:`~scim2_server.testing.ScimStorageContract.search_users`, and return the users without
+these attributes.
