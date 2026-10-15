@@ -7,6 +7,11 @@ Changelog
 Added
 ^^^^^
 - Support for Python 3.15.
+- The storage contract checks each filter and each sort of a list against
+  :meth:`ScimFilter.match <scim2_models.ScimFilter.match>` and
+  :meth:`SearchRequest.sort <scim2_models.SearchRequest.sort>`, over users made to catch the
+  usual mistakes of a translation into a query. It skips the filters and the sorts the storage
+  refuses. See :doc:`how-to/check-a-storage` and :doc:`explanation/search`.
 
 [0.8.0] - 2026-10-09
 --------------------

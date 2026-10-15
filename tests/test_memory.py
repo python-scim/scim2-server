@@ -7,6 +7,8 @@ from scim2_models import Attribute
 from scim2_models import CaseExact
 from scim2_models import Extension
 from scim2_models import Filter
+from scim2_models import InvalidFilterException
+from scim2_models import InvalidPathException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
@@ -68,6 +70,25 @@ class TestInMemoryStorageWithoutSearchFeatures(ScimStorageContract):
             resource_types=scim_provider.resource_types,
             config=config,
         )
+
+
+class StorageWithoutTitle(InMemoryStorage):
+    """Refuse to filter or to sort on the title, as a storage that does not store it."""
+
+    def search(self, resource_types, search_request, *, position=None):
+        if search_request.filter is not None and "title" in str(search_request.filter):
+            raise InvalidFilterException(detail="Cannot filter on 'title'")
+        if str(search_request.sort_by) == "title":
+            raise InvalidPathException(detail="Cannot sort on 'title'")
+        return super().search(resource_types, search_request, position=position)
+
+
+class TestStorageRefusingSomeSearches(ScimStorageContract):
+    """The contract skips the filters and the sorts a storage refuses."""
+
+    @pytest.fixture
+    def storage(self):
+        return StorageWithoutTitle()
 
 
 def test_identifiers_can_be_predictable(user_type, scim_provider):

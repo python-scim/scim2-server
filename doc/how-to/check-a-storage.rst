@@ -8,7 +8,8 @@ assumes a storage written as :doc:`write-a-storage` explains, and tests run with
 
 The suite checks what the method signatures do not tell: the copies, the 404 and 412 errors,
 the dates and versions, the uniqueness of ``userName``, and the filters, sorting and paging of
-the searches. It uses the ``User`` and ``Group`` resource types of :rfc:`RFC 7643 <7643>`.
+the searches. It runs each filter and each sort of a list, and compares the answer of the
+storage with the rules of SCIM. It uses the ``User`` and ``Group`` resource types of :rfc:`RFC 7643 <7643>`.
 
 Run the suite
 -------------
@@ -77,8 +78,9 @@ Run the suite
    .. code-block:: console
 
        $ pytest
-       ..............................                                           [100%]
-       30 passed in 0.83s
+       ........................................................................ [ 75%]
+       ........................                                                 [100%]
+       96 passed in 6.09s
 
 Skip what the storage does not support
 --------------------------------------
@@ -96,9 +98,10 @@ override the ``provider`` fixture. In its :class:`~scim2_models.ServiceProviderC
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [2] scim2_server/testing.py:101: The service does not support filtering
-    SKIPPED [1] scim2_server/testing.py:101: The service does not support sorting
-    ======================== 27 passed, 3 skipped in 1.03s =========================
+    SKIPPED [46] scim2_server/testing.py:215: The service does not support filtering
+    SKIPPED [21] scim2_server/testing.py:215: The service does not support sorting
+    SKIPPED [8] scim2_server/testing.py:215: The service does not support cursor pagination
+    ======================= 31 passed, 75 skipped in 6.57s =========================
 
 For a storage that cannot search several resource types at once, set
 :attr:`~scim2_server.testing.ScimStorageContract.supports_root_search` to :data:`False`:
@@ -109,5 +112,35 @@ For a storage that cannot search several resource types at once, set
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [2] scim2_server/testing.py:101: The service does not support searching at the root
-    ======================== 28 passed, 2 skipped in 0.99s =========================
+    SKIPPED [3] scim2_server/testing.py:215: The service does not support searching at the root
+    SKIPPED [9] scim2_server/testing.py:215: The service does not support cursor pagination
+    ======================= 94 passed, 12 skipped in 6.79s =========================
+
+Check the filters and the sorts
+-------------------------------
+
+A storage that searches a database translates the filters and the sorts into queries. A direct
+translation answers another question on missing values, multi-valued attributes, case or
+``NULL`` in a sort: :doc:`../explanation/search` lists these traps.
+
+The suite searches a few users made to fall into them, with each filter and each sort of a list.
+It compares the resources the storage returns with the ones
+:meth:`ScimFilter.match <scim2_models.ScimFilter.match>` keeps, and their order with the one
+:meth:`SearchRequest.sort <scim2_models.SearchRequest.sort>` gives. Resources with the same sort
+value may come in any order.
+
+A storage refuses a filter it cannot translate with
+:class:`~scim2_models.InvalidFilterException`, and a sort with
+:class:`~scim2_models.InvalidPathException`. The suite skips the filters and the sorts the storage
+refuses, and checks the answer of the others:
+
+.. code-block:: console
+
+    $ pytest -rs
+    SKIPPED [11] scim2_server/testing.py:653: The storage refuses the search: Cannot filter on 'title'
+    SKIPPED [2] scim2_server/testing.py:653: The storage refuses the search: Cannot sort on 'title'
+
+The users carry the attributes of the ``User`` resource type and of its enterprise extension. For
+a storage that does not store some of them, override
+:meth:`~scim2_server.testing.ScimStorageContract.search_users`, and return the users without these
+attributes.

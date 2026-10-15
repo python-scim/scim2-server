@@ -30,11 +30,14 @@ from typing import cast
 
 import pytest
 from scim2_models import Context
+from scim2_models import InvalidFilterException
+from scim2_models import InvalidPathException
 from scim2_models import NotFoundException
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ResponseParameters
+from scim2_models import ScimFilter
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
 from scim2_models import UniquenessException
@@ -49,6 +52,100 @@ from scim2_server.utils import load_default_provider
 from scim2_server.utils import parametrize
 
 T = TypeVar("T")
+
+ENTERPRISE = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+
+SEARCH_USERS: list[dict[str, Any]] = [
+    {
+        "userName": "alice",
+        "displayName": "Alice",
+        "title": "Boss",
+        "name": {"givenName": "Alice", "familyName": "Liddell"},
+        "active": True,
+        "emails": [
+            {"value": "alice@home.example", "type": "home"},
+            {"value": "alice@work.example", "type": "work", "primary": True},
+        ],
+        ENTERPRISE: {"employeeNumber": "100"},
+    },
+    {
+        "userName": "Bob",
+        "active": False,
+        "emails": [{"value": "bob@work.example", "type": "work"}],
+    },
+    {
+        "userName": "carol",
+        "title": "",
+        "name": {"familyName": "smith"},
+        ENTERPRISE: {"employeeNumber": "2"},
+    },
+    {
+        "userName": "dave_%",
+        "title": "50% off",
+        "emails": [{"value": "dave@home.example"}],
+    },
+]
+"""The users the filter and sort tests search, with the case, missing values and
+``LIKE`` wildcards a translation into a query tends to get wrong."""
+
+SEARCH_FILTERS = [
+    'userName eq "ALICE"',
+    'userName ne "alice"',
+    'userName sw "dave_"',
+    'userName ew "_%"',
+    'userName co "a"',
+    'userName gt "b"',
+    'userName le "carol"',
+    'title eq "boss"',
+    'title ne "Boss"',
+    'not (title eq "Boss")',
+    "title eq null",
+    "title ne null",
+    "title gt null",
+    "title pr",
+    'title co "%"',
+    'title lt "c"',
+    "displayName pr",
+    "name pr",
+    "name.givenName pr",
+    'name.familyName eq "SMITH"',
+    "active eq true",
+    "active eq false",
+    "not (active eq true)",
+    "active ne true",
+    'meta.created co "20"',
+    "active pr",
+    "emails pr",
+    'emails eq "alice@work.example"',
+    'emails ne "alice@work.example"',
+    'emails co "WORK"',
+    'emails.type eq "work"',
+    "emails.type pr",
+    "emails.primary eq true",
+    'emails[type eq "work" and value co "alice"]',
+    'emails[type eq "home" and primary eq true]',
+    'emails[value ne "alice@work.example"]',
+    'emails[not (type eq "work")]',
+    "emails[type pr]",
+    'meta.created gt "2000-01-01T00:00:00Z"',
+    'meta.lastModified lt "2000-01-01T00:00:00Z"',
+    f'{ENTERPRISE}:employeeNumber eq "100"',
+    f'{ENTERPRISE}:employeeNumber gt "10"',
+    'title eq "Boss" or userName eq "Bob"',
+    'title eq "Boss" and active eq false',
+]
+
+SEARCH_SORTS = [
+    "userName",
+    "title",
+    "displayName",
+    "name.familyName",
+    "active",
+    "emails",
+    "emails.type",
+    "meta.created",
+    f"{ENTERPRISE}:employeeNumber",
+]
 
 
 class ScimStorageContract:
@@ -535,6 +632,79 @@ class ScimStorageContract:
 
         assert page.total == 1
         assert page.resources[0].user_name == "alice"
+
+    def search_users(self) -> list[dict[str, Any]]:
+        """Return the users the filter and sort tests search.
+
+        Override it to leave out the attributes the storage does not store.
+        """
+        return SEARCH_USERS
+
+    def search_or_skip(
+        self,
+        storage: Any,
+        resource_types: list[ResourceType],
+        search_request: SearchRequest[Any],
+    ) -> Any:
+        """Search a storage, and skip the current test when the storage refuses the filter or the sort."""
+        try:
+            return self.search(storage, resource_types, search_request)
+        except (InvalidFilterException, InvalidPathException) as exception:
+            pytest.skip(f"The storage refuses the search: {exception.detail}")
+
+    @pytest.mark.parametrize("scim_filter", SEARCH_FILTERS)
+    def test_search_filters_as_the_filter_evaluator(
+        self,
+        storage: Any,
+        provider: ScimProvider,
+        user_type: ResourceType,
+        user_model: Any,
+        scim_filter: str,
+    ) -> None:
+        """A filter keeps the resources that ScimFilter.match keeps, and the total counts them."""
+        self.require(self.announces(provider, "filter"), "filtering")
+        for user in self.search_users():
+            storage.create(user_type, user_model.model_validate(user))
+        stored = self.search(storage, [user_type], self.search_request([user_model]))
+        search_request = self.search_request([user_model], filter=scim_filter)
+
+        page = self.search_or_skip(storage, [user_type], search_request)
+
+        evaluator = cast(ScimFilter[Any], search_request.filter)
+        expected = [r.id for r in stored.resources if evaluator.match(r)]
+        assert page.total == len(expected)
+        assert sorted(r.id for r in page.resources) == sorted(expected)
+
+    @pytest.mark.parametrize("sort_order", ["ascending", "descending"])
+    @pytest.mark.parametrize("sort_by", SEARCH_SORTS)
+    def test_search_sorts_as_search_request_sort(
+        self,
+        storage: Any,
+        provider: ScimProvider,
+        user_type: ResourceType,
+        user_model: Any,
+        sort_by: str,
+        sort_order: str,
+    ) -> None:
+        """A sorted search orders the resources as SearchRequest.sort does.
+
+        Resources with the same sort value may come in any order.
+        """
+        self.require(self.announces(provider, "sort"), "sorting")
+        for user in self.search_users():
+            storage.create(user_type, user_model.model_validate(user))
+        stored = self.search(storage, [user_type], self.search_request([user_model]))
+        search_request = self.search_request(
+            [user_model], sort_by=sort_by, sort_order=sort_order
+        )
+
+        page = self.search_or_skip(storage, [user_type], search_request)
+
+        expected = search_request.sort(stored.resources)
+        assert sorted(r.id for r in page.resources) == sorted(r.id for r in expected)
+        assert [search_request.sort_value(r) for r in page.resources] == [
+            search_request.sort_value(r) for r in expected
+        ]
 
     def walk(
         self,
