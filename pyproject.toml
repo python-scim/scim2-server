@@ -181,6 +181,7 @@ uv_resolution = "lowest-direct"
 
 [tool.tox.env.doc]
 dependency_groups = ["doc"]
+extras = ["cursor", "testing"]
 commands = [
     ["sphinx-build", "-W", "--keep-going", "--builder", "html", "doc", "build/sphinx/html"],
 ]
