@@ -29,6 +29,7 @@ from typing import Union
 from typing import cast
 
 import pytest
+from pydantic import ValidationError
 from scim2_models import Context
 from scim2_models import InvalidFilterException
 from scim2_models import InvalidPathException
@@ -640,6 +641,21 @@ class ScimStorageContract:
         """
         return SEARCH_USERS
 
+    def search_request_or_skip(
+        self, models: list[type[Resource[Any]]], **parameters: Any
+    ) -> SearchRequest[Any]:
+        """Build a search request, and skip the current test when the models do not declare an attribute of the filter or the sort."""
+        try:
+            return self.search_request(models, **parameters)
+        except ValidationError as exception:
+            errors = exception.errors()
+            if any(
+                error["type"] not in ("scim_invalidFilter", "scim_invalidPath")
+                for error in errors
+            ):
+                raise
+            pytest.skip(f"The models refuse the search: {errors[0]['msg']}")
+
     def search_or_skip(
         self,
         storage: Any,
@@ -666,7 +682,7 @@ class ScimStorageContract:
         for user in self.search_users():
             storage.create(user_type, user_model.model_validate(user))
         stored = self.search(storage, [user_type], self.search_request([user_model]))
-        search_request = self.search_request([user_model], filter=scim_filter)
+        search_request = self.search_request_or_skip([user_model], filter=scim_filter)
 
         page = self.search_or_skip(storage, [user_type], search_request)
 
@@ -694,7 +710,7 @@ class ScimStorageContract:
         for user in self.search_users():
             storage.create(user_type, user_model.model_validate(user))
         stored = self.search(storage, [user_type], self.search_request([user_model]))
-        search_request = self.search_request(
+        search_request = self.search_request_or_skip(
             [user_model], sort_by=sort_by, sort_order=sort_order
         )
 
@@ -796,6 +812,7 @@ class ScimStorageContract:
     ) -> None:
         """Resources with the same sort value, or without one, are returned once, even across pages."""
         self.require(self.announces(provider, "sort"), "sorting")
+        self.require("nick_name" in user_model.model_fields, "nickName")
         for user_name, nick_name in [
             ("alice", "twin"),
             ("bob", None),

@@ -98,9 +98,9 @@ override the ``provider`` fixture. In its :class:`~scim2_models.ServiceProviderC
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [46] scim2_server/testing.py:215: The service does not support filtering
-    SKIPPED [21] scim2_server/testing.py:215: The service does not support sorting
-    SKIPPED [8] scim2_server/testing.py:215: The service does not support cursor pagination
+    SKIPPED [46] scim2_server/testing.py:216: The service does not support filtering
+    SKIPPED [21] scim2_server/testing.py:216: The service does not support sorting
+    SKIPPED [8] scim2_server/testing.py:216: The service does not support cursor pagination
     ======================= 31 passed, 75 skipped in 6.57s =========================
 
 For a storage that cannot search several resource types at once, set
@@ -112,8 +112,8 @@ For a storage that cannot search several resource types at once, set
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [3] scim2_server/testing.py:215: The service does not support searching at the root
-    SKIPPED [9] scim2_server/testing.py:215: The service does not support cursor pagination
+    SKIPPED [3] scim2_server/testing.py:216: The service does not support searching at the root
+    SKIPPED [9] scim2_server/testing.py:216: The service does not support cursor pagination
     ======================= 94 passed, 12 skipped in 6.79s =========================
 
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
@@ -123,10 +123,11 @@ sorts the storage refuses, and checks the others:
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [11] scim2_server/testing.py:653: The storage refuses the search: Cannot filter on 'title'
-    SKIPPED [2] scim2_server/testing.py:653: The storage refuses the search: Cannot sort on 'title'
+    SKIPPED [11] scim2_server/testing.py:669: The storage refuses the search: Cannot filter on 'title'
+    SKIPPED [2] scim2_server/testing.py:669: The storage refuses the search: Cannot sort on 'title'
 
 The filters and the sorts search users with the attributes of the ``User`` resource type and of
 its enterprise extension. For a storage that does not store some of them, override
 :meth:`~scim2_server.testing.ScimStorageContract.search_users`, and return the users without
-these attributes.
+these attributes. The suite skips the filters and the sorts on the attributes the models of
+the ``provider`` fixture lack.

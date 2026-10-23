@@ -2,6 +2,7 @@ import datetime
 from typing import Annotated
 
 import pytest
+from pydantic import ValidationError
 from scim2_models import URN
 from scim2_models import Attribute
 from scim2_models import CaseExact
@@ -25,6 +26,8 @@ from scim2_server.memory import InMemoryStorage
 from scim2_server.storage import SearchPage
 from scim2_server.testing import AsyncScimStorageContract
 from scim2_server.testing import ScimStorageContract
+from scim2_server.utils import load_default_resource_types
+from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
 
 
@@ -89,6 +92,47 @@ class TestStorageRefusingSomeSearches(ScimStorageContract):
     @pytest.fixture
     def storage(self):
         return StorageWithoutTitle()
+
+
+class TestModelsWithoutSomeAttributes(ScimStorageContract):
+    """The contract skips the filters and the sorts the models refuse."""
+
+    @pytest.fixture
+    def storage(self):
+        return InMemoryStorage()
+
+    @pytest.fixture
+    def provider(self):
+        schemas = load_default_schemas()
+        user = schemas["urn:ietf:params:scim:schemas:core:2.0:User"]
+        user.attributes = [a for a in user.attributes if a.name != "nickName"]
+        emails = next(a for a in user.attributes if a.name == "emails")
+        emails.sub_attributes = [
+            a for a in emails.sub_attributes if a.name not in ("type", "primary")
+        ]
+        return ScimProvider.from_discovery(
+            schemas.values(),
+            load_default_resource_types().values(),
+            config=load_default_service_provider_config(),
+        )
+
+    def search_users(self):
+        return [
+            {
+                **user,
+                "emails": [{"value": email["value"]} for email in user["emails"]],
+            }
+            if "emails" in user
+            else user
+            for user in super().search_users()
+        ]
+
+
+def test_the_contract_does_not_skip_other_invalid_searches(user_type, scim_provider):
+    """A search request invalid for another reason than an undeclared attribute fails."""
+    User = scim_provider.model_for(user_type)
+    with pytest.raises(ValidationError):
+        ScimStorageContract().search_request_or_skip([User], count="many")
 
 
 def test_identifiers_can_be_predictable(user_type, scim_provider):
