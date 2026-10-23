@@ -95,6 +95,22 @@ class TestStorageRefusingSomeSearches(ScimStorageContract):
         return StorageWithoutTitle()
 
 
+class StorageRefusingEmptyGroups(InMemoryStorage):
+    """Refuse groups without members."""
+
+    def create(self, resource_type, resource):
+        assert resource_type.id != "Group" or resource.members
+        return super().create(resource_type, resource)
+
+
+class TestStorageRefusingEmptyGroups(ScimStorageContract):
+    """The contract only creates groups with members."""
+
+    @pytest.fixture
+    def storage(self):
+        return StorageRefusingEmptyGroups()
+
+
 class TestModelsWithoutSomeAttributes(ScimStorageContract):
     """The contract skips the filters and the sorts the models refuse."""
 

@@ -233,6 +233,18 @@ class ScimStorageContract:
             for user_name in user_names
         ]
 
+    def create_group(
+        self,
+        storage: ScimStorage,
+        group_type: ResourceType,
+        group_model: Any,
+        member: Any,
+    ) -> Any:
+        return storage.create(
+            group_type,
+            group_model(display_name="admins", members=[{"value": member.id}]),
+        )
+
     def test_create_fills_the_identifier_and_the_meta(
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
@@ -498,8 +510,8 @@ class ScimStorageContract:
         group_model: Any,
     ) -> None:
         """A search on a resource type returns its resources only, and counts them."""
-        self.create_users(storage, user_type, user_model, "alice", "bob")
-        storage.create(group_type, group_model(display_name="admins"))
+        users = self.create_users(storage, user_type, user_model, "alice", "bob")
+        self.create_group(storage, group_type, group_model, users[0])
 
         page = self.search(storage, [user_type], self.search_request([user_model]))
 
@@ -595,8 +607,8 @@ class ScimStorageContract:
     ) -> None:
         """A search on several resource types returns their resources as one collection."""
         self.require(self.supports_root_search, "searching at the root")
-        self.create_users(storage, user_type, user_model, "alice")
-        storage.create(group_type, group_model(display_name="admins"))
+        (user,) = self.create_users(storage, user_type, user_model, "alice")
+        self.create_group(storage, group_type, group_model, user)
 
         page = self.search(
             storage,
@@ -622,8 +634,8 @@ class ScimStorageContract:
         """An attribute a resource type does not declare matches none of its resources."""
         self.require(self.supports_root_search, "searching at the root")
         self.require(self.announces(provider, "filter"), "filtering")
-        self.create_users(storage, user_type, user_model, "alice")
-        storage.create(group_type, group_model(display_name="admins"))
+        (user,) = self.create_users(storage, user_type, user_model, "alice")
+        self.create_group(storage, group_type, group_model, user)
 
         page = self.search(
             storage,
@@ -947,7 +959,7 @@ class ScimStorageContract:
         self.require(storage.supports_cursors, "cursor pagination")
         self.require(self.supports_root_search, "searching at the root")
         users = self.create_users(storage, user_type, user_model, "alice", "bob")
-        group = storage.create(group_type, group_model(display_name="admins"))
+        group = self.create_group(storage, group_type, group_model, users[0])
 
         pages = self.walk(
             storage,
