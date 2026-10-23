@@ -99,8 +99,8 @@ override the ``provider`` fixture. In its :class:`~scim2_models.ServiceProviderC
 
     $ pytest -rs
     SKIPPED [46] scim2_server/testing.py:216: The service does not support filtering
-    SKIPPED [21] scim2_server/testing.py:216: The service does not support sorting
-    SKIPPED [8] scim2_server/testing.py:216: The service does not support cursor pagination
+    SKIPPED [19] scim2_server/testing.py:216: The service does not support sorting
+    SKIPPED [10] scim2_server/testing.py:216: The service does not support cursor pagination
     ======================= 31 passed, 75 skipped in 6.57s =========================
 
 For a storage that cannot search several resource types at once, set
@@ -112,8 +112,8 @@ For a storage that cannot search several resource types at once, set
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [3] scim2_server/testing.py:216: The service does not support searching at the root
-    SKIPPED [9] scim2_server/testing.py:216: The service does not support cursor pagination
+    SKIPPED [2] scim2_server/testing.py:216: The service does not support searching at the root
+    SKIPPED [10] scim2_server/testing.py:216: The service does not support cursor pagination
     ======================= 94 passed, 12 skipped in 6.79s =========================
 
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,

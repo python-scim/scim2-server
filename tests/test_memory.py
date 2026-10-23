@@ -1,4 +1,5 @@
 import datetime
+import inspect
 from typing import Annotated
 
 import pytest
@@ -133,6 +134,24 @@ def test_the_contract_does_not_skip_other_invalid_searches(user_type, scim_provi
     User = scim_provider.model_for(user_type)
     with pytest.raises(ValidationError):
         ScimStorageContract().search_request_or_skip([User], count="many")
+
+
+class StorageWithoutCursors:
+    supports_cursors = False
+
+
+@pytest.mark.parametrize(
+    "name",
+    [name for name in dir(ScimStorageContract) if name.startswith("test_cursor_")],
+)
+def test_the_cursor_tests_skip_before_creating_resources(name):
+    """The cursor tests skip a storage without cursors before they create any resource."""
+    test = getattr(ScimStorageContract(), name)
+    parameters = dict.fromkeys(inspect.signature(test).parameters)
+    parameters["storage"] = StorageWithoutCursors()
+
+    with pytest.raises(pytest.skip.Exception):
+        test(**parameters)
 
 
 def test_identifiers_can_be_predictable(user_type, scim_provider):

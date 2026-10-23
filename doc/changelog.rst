@@ -8,6 +8,7 @@ Fixed
 ^^^^^
 - The storage contract skips the filters, the sorts and the cursor test on attributes the models
   lack, instead of failing.
+- The cursor tests of the storage contract no longer create resources for storages without cursors.
 
 [0.8.1] - 2026-10-15
 --------------------

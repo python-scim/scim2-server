@@ -759,6 +759,7 @@ class ScimStorageContract:
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
         """Following the next cursors returns every resource once, count by count."""
+        self.require(storage.supports_cursors, "cursor pagination")
         names = ["alice", "bob", "carol", "dave", "erin"]
         self.create_users(storage, user_type, user_model, *names)
 
@@ -779,6 +780,7 @@ class ScimStorageContract:
         user_model: Any,
     ) -> None:
         """The pages of a sorted search follow each other in the sort order."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.require(self.announces(provider, "sort"), "sorting")
         self.create_users(
             storage, user_type, user_model, "dave", "alice", "carol", "bob"
@@ -811,6 +813,7 @@ class ScimStorageContract:
         user_model: Any,
     ) -> None:
         """Resources with the same sort value, or without one, are returned once, even across pages."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.require(self.announces(provider, "sort"), "sorting")
         self.require("nick_name" in user_model.model_fields, "nickName")
         for user_name, nick_name in [
@@ -838,6 +841,7 @@ class ScimStorageContract:
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
         """Following the previous cursors from the last page returns the same pages, back to the first."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.create_users(
             storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
         )
@@ -856,6 +860,7 @@ class ScimStorageContract:
         self, storage: Any, user_type: ResourceType, user_model: Any, deleted: str
     ) -> None:
         """Deleting a resource already returned does not skip nor repeat the next ones."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.create_users(
             storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
         )
@@ -877,6 +882,7 @@ class ScimStorageContract:
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
         """Creating a resource between two pages does not skip nor repeat the existing ones."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.create_users(
             storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
         )
@@ -898,6 +904,7 @@ class ScimStorageContract:
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
         """Deleting the first resource of a page does not change the page before it."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.create_users(
             storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
         )
@@ -937,6 +944,7 @@ class ScimStorageContract:
         group_model: Any,
     ) -> None:
         """A cursor pages the resources of several resource types as one collection."""
+        self.require(storage.supports_cursors, "cursor pagination")
         self.require(self.supports_root_search, "searching at the root")
         users = self.create_users(storage, user_type, user_model, "alice", "bob")
         group = storage.create(group_type, group_model(display_name="admins"))
