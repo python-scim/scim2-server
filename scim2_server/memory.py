@@ -155,10 +155,25 @@ class InMemoryStorage(ScimStorage):
     supports_cursors = True
 
     def __init__(self, clock: Callable[[], datetime.datetime] = utcnow) -> None:
-        self.resources: list[Resource[Any]] = []
+        self._resources: dict[str | None, dict[str, Resource[Any]]] = {}
         self.clock = clock
         self.lock = RLock()
         self.versions = itertools.count(1)
+
+    @property
+    def resources(self) -> list[Resource[Any]]:
+        """The stored resources."""
+        return [
+            resource
+            for resources in self._resources.values()
+            for resource in resources.values()
+        ]
+
+    @resources.setter
+    def resources(self, resources: list[Resource[Any]]) -> None:
+        self._resources = {}
+        for resource in resources:
+            self._store(resource)
 
     def generate_id(self, resource_type: ResourceType, resource: Resource[Any]) -> str:
         """Return the identifier of a new resource.
@@ -189,9 +204,7 @@ class InMemoryStorage(ScimStorage):
         response_parameters: ResponseParameters[Any] | None = None,
     ) -> Resource[Any]:
         with self.lock:
-            return self.resources[self._index(resource_type, resource_id)].model_copy(
-                deep=True
-            )
+            return self._stored(resource_type, resource_id).model_copy(deep=True)
 
     def search(
         self,
@@ -201,10 +214,11 @@ class InMemoryStorage(ScimStorage):
         position: Any = None,
     ) -> SearchPage:
         with self.lock:
+            names = dict.fromkeys(rt.name for rt in resource_types)
             candidates = [
                 resource
-                for resource in self.resources
-                if any(self._is_of_type(resource, rt) for rt in resource_types)
+                for name in names
+                for resource in self._resources.get(name, {}).values()
             ]
 
             scim_filter = search_request.filter
@@ -233,7 +247,7 @@ class InMemoryStorage(ScimStorage):
                 version=self.next_version(),
             )
             self._check_uniqueness(resource)
-            self.resources.append(resource)
+            self._store(resource)
             return resource.model_copy(deep=True)
 
     def update(
@@ -244,8 +258,7 @@ class InMemoryStorage(ScimStorage):
         expected_version: str | None = None,
     ) -> Resource[Any]:
         with self.lock:
-            index = self._index(resource_type, resource.id)
-            stored = self.resources[index]
+            stored = self._stored(resource_type, resource.id)
             self._check_version(stored, expected_version)
 
             updated = type(resource).model_validate(resource.model_dump())
@@ -258,7 +271,7 @@ class InMemoryStorage(ScimStorage):
                 }
             )
             self._check_uniqueness(updated)
-            self.resources[index] = updated
+            self._store(updated)
             return updated.model_copy(deep=True)
 
     def delete(
@@ -269,26 +282,29 @@ class InMemoryStorage(ScimStorage):
         expected_version: str | None = None,
     ) -> None:
         with self.lock:
-            index = self._index(resource_type, resource_id)
-            self._check_version(self.resources[index], expected_version)
-            del self.resources[index]
+            stored = self._stored(resource_type, resource_id)
+            self._check_version(stored, expected_version)
+            del self._resources[resource_type.name][resource_id]
 
-    def _is_of_type(self, resource: Resource[Any], resource_type: ResourceType) -> bool:
-        """Tell whether a resource belongs to a resource type.
+    def _store(self, resource: Resource[Any]) -> None:
+        """Keep a resource under its resource type and its identifier.
 
         Per RFC 7643 §3.1, meta.resourceType holds the name of the resource
         type, which may differ from its id.
         """
         assert resource.meta is not None
-        return resource.meta.resource_type == resource_type.name
+        resources = self._resources.setdefault(resource.meta.resource_type, {})
+        resources[cast(str, resource.id)] = resource
 
-    def _index(self, resource_type: ResourceType, resource_id: str | None) -> int:
-        for index, resource in enumerate(self.resources):
-            if self._is_of_type(resource, resource_type) and resource.id == resource_id:
-                return index
-        raise NotFoundException(
-            detail=f"{resource_type.name} {resource_id!r} not found"
-        )
+    def _stored(
+        self, resource_type: ResourceType, resource_id: str | None
+    ) -> Resource[Any]:
+        try:
+            return self._resources[resource_type.name][cast(str, resource_id)]
+        except KeyError:
+            raise NotFoundException(
+                detail=f"{resource_type.name} {resource_id!r} not found"
+            ) from None
 
     @staticmethod
     def _check_version(resource: Resource[Any], expected_version: str | None) -> None:

@@ -11,6 +11,7 @@ from scim2_models import Extension
 from scim2_models import Filter
 from scim2_models import InvalidFilterException
 from scim2_models import InvalidPathException
+from scim2_models import NotFoundException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
@@ -205,6 +206,20 @@ def test_versions_differ_within_the_same_instant(user_type, scim_provider):
     updated = storage.update(user_type, user)
 
     assert updated.meta.version != user.meta.version
+
+
+def test_the_resources_can_be_replaced(user_type, scim_provider):
+    """Resources assigned to a storage can be read, and the former ones are gone."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    former = storage.create(user_type, User(user_name="bjensen"))
+    kept = InMemoryStorage().create(user_type, User(user_name="jsmith"))
+
+    storage.resources = [kept]
+
+    assert storage.get(user_type, kept.id).user_name == "jsmith"
+    with pytest.raises(NotFoundException):
+        storage.get(user_type, former.id)
 
 
 def test_operations_can_be_nested(user_type, scim_provider):
