@@ -22,6 +22,8 @@ from scim2_models import ScimFilter
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
 from scim2_models import UniquenessException
+from scim2_models.path import CompareOperator
+from scim2_models.path import Comparison
 
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
@@ -155,6 +157,23 @@ def _key(resource: Resource[Any]) -> Key:
     return resource.meta.resource_type, cast(str, resource.id)
 
 
+def _equality(scim_filter: ScimFilter[Any] | None) -> AttributeBinding | None:
+    """Return the attribute a filter compares to a string with eq, if it holds a single string."""
+    if scim_filter is None or scim_filter.model is None:
+        return None
+    node = scim_filter.ast
+    if (
+        not isinstance(node, Comparison)
+        or node.op != CompareOperator.eq
+        or not isinstance(node.value, str)
+    ):
+        return None
+    binding = scim_filter.resolve_comparison(node.attr_path, strict=False)
+    if binding is None or binding.is_multivalued or binding.target_type is not str:
+        return None
+    return binding
+
+
 def _hashable(value: Any) -> Any:
     """Return a form of a value that a dict can hold as a key.
 
@@ -171,11 +190,13 @@ def _hashable(value: Any) -> Any:
 class InMemoryStorage(ScimStorage):
     """A storage keeping the resources in memory, for tests, debugging and demos.
 
-    It is not optimized for performance: a search walks every resource. A
-    lock serializes every access, so it can serve a threaded server.
+    It indexes the resources by identifier and the unique values. A search
+    walks every resource of the searched types, unless it compares a single
+    string attribute to a string with ``eq``. A lock serializes every access,
+    so it can serve a threaded server.
 
-    It compares unique values under the policy in effect when they were
-    written, so it serves the resources of a single policy.
+    It indexes the values under the policy in effect when they were written,
+    so it serves the resources of a single policy.
 
     :param clock: Return the date of a write, for ``meta.created`` and
         ``meta.lastModified``. Pass a fixed clock to get predictable dates.
@@ -187,6 +208,10 @@ class InMemoryStorage(ScimStorage):
         self._resources: dict[str | None, dict[str, Resource[Any]]] = {}
         self._owners: dict[str, dict[Any, Key]] = {}
         self._unique_values: dict[Key, dict[str, Any]] = {}
+        self._equalities: dict[
+            str | None, dict[AttributeBinding, dict[Any, set[str]]]
+        ] = {}
+        self._equal_values: dict[Key, dict[AttributeBinding, Any]] = {}
         self.clock = clock
         self.lock = RLock()
         self.versions = itertools.count(1)
@@ -205,6 +230,8 @@ class InMemoryStorage(ScimStorage):
         self._resources = {}
         self._owners = {}
         self._unique_values = {}
+        self._equalities = {}
+        self._equal_values = {}
         for resource in resources:
             self._store(resource, self._values_of(resource))
 
@@ -247,14 +274,10 @@ class InMemoryStorage(ScimStorage):
         position: Any = None,
     ) -> SearchPage:
         with self.lock:
-            names = dict.fromkeys(rt.name for rt in resource_types)
-            candidates = [
-                resource
-                for name in names
-                for resource in self._resources.get(name, {}).values()
-            ]
-
+            names = list(dict.fromkeys(rt.name for rt in resource_types))
             scim_filter = search_request.filter
+            candidates = self._candidates(names, scim_filter)
+
             if scim_filter is not None and not scim_filter.models and candidates:
                 models = tuple(dict.fromkeys(type(r) for r in candidates))
                 scim_filter = parametrize(ScimFilter, Union[models])(str(scim_filter))  # noqa: UP007
@@ -319,22 +342,71 @@ class InMemoryStorage(ScimStorage):
         with self.lock:
             stored = self._stored(resource_type, resource_id)
             self._check_version(stored, expected_version)
-            del self._resources[resource_type.name][resource_id]
-            self._release(_key(stored))
+            self._remove(_key(stored))
+
+    def _candidates(
+        self, names: list[str | None], scim_filter: ScimFilter[Any] | None
+    ) -> list[Resource[Any]]:
+        """Return the resources a search walks.
+
+        A search on a single resource type, comparing a single string
+        attribute to a string with eq, walks only the resources holding an
+        equal value. The values are indexed on the first such search.
+        """
+        binding = _equality(scim_filter) if len(names) == 1 else None
+        if binding is None:
+            return [
+                resource
+                for name in names
+                for resource in self._resources.get(name, {}).values()
+            ]
+
+        node = cast(Comparison, cast(ScimFilter[Any], scim_filter).ast)
+        try:
+            value = binding.comparable(node.value)
+        except ValueError:
+            return []
+        resources = self._resources.get(names[0], {})
+        ids = self._equality_index(names[0], binding).get(value, set())
+        return [resources[resource_id] for resource_id in ids]
+
+    def _equality_index(
+        self, name: str | None, binding: AttributeBinding
+    ) -> dict[Any, set[str]]:
+        """Return the identifiers of the resources of a type, by the value of an attribute."""
+        indexes = self._equalities.setdefault(name, {})
+        if binding not in indexes:
+            indexes[binding] = {}
+            for resource in self._resources.get(name, {}).values():
+                self._index_equality(resource, binding)
+        return indexes[binding]
+
+    def _index_equality(
+        self, resource: Resource[Any], binding: AttributeBinding
+    ) -> None:
+        key = _key(resource)
+        value = self._comparable_value(resource, binding)
+        self._equal_values.setdefault(key, {})[binding] = value
+        self._equalities[key[0]][binding].setdefault(value, set()).add(key[1])
 
     def _store(self, resource: Resource[Any], values: dict[str, Any]) -> None:
-        """Keep a resource under its resource type and its identifier, and own its unique values."""
+        """Keep a resource under its resource type and its identifier, and index its values."""
         key = _key(resource)
+        self._remove(key)
         self._resources.setdefault(key[0], {})[key[1]] = resource
-        self._release(key)
         self._unique_values[key] = values
         for urn, value in values.items():
             self._owners.setdefault(urn, {})[value] = key
+        for binding in self._equalities.get(key[0], {}):
+            self._index_equality(resource, binding)
 
-    def _release(self, key: Key) -> None:
-        """Free the unique values a resource owned."""
+    def _remove(self, key: Key) -> None:
+        """Forget a resource and its indexed values."""
+        self._resources.get(key[0], {}).pop(key[1], None)
         for urn, value in self._unique_values.pop(key, {}).items():
             del self._owners[urn][value]
+        for binding, value in self._equal_values.pop(key, {}).items():
+            self._equalities[key[0]][binding][value].discard(key[1])
 
     def _stored(
         self, resource_type: ResourceType, resource_id: str | None
@@ -380,14 +452,14 @@ class InMemoryStorage(ScimStorage):
         values = {}
         for path in unique_paths:
             attribute = cast(AttributeBinding, path.resolve())
-            value = self._unique_value(resource, attribute)
+            value = self._comparable_value(resource, attribute)
             if value is not None:
                 values[attribute.urn] = _hashable(value)
         return values
 
     @staticmethod
-    def _unique_value(resource: Resource[Any], attribute: AttributeBinding) -> Any:
-        """Return the value a resource holds for a unique attribute, in the form it is compared in.
+    def _comparable_value(resource: Resource[Any], attribute: AttributeBinding) -> Any:
+        """Return the value a resource holds for an attribute, in the form it is compared in.
 
         A resource whose schemas do not declare the attribute holds no value.
         A string the policy cannot compare is equal to no other value, so it

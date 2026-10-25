@@ -11,9 +11,10 @@ Added
 Changed
 ^^^^^^^
 - :class:`~scim2_server.memory.InMemoryStorage` reads, writes and searches faster. A search copies
-  only the resources of the returned page, and the unique values are indexed.
-- :class:`~scim2_server.memory.InMemoryStorage` compares unique values under the policy in effect
-  when they were written, so it serves the resources of a single policy.
+  only the resources of the returned page. The unique values are indexed, and so are the values a
+  search compares with ``eq``, such as ``externalId eq "…"``.
+- :class:`~scim2_server.memory.InMemoryStorage` indexes the values under the policy in effect when
+  they were written, so it serves the resources of a single policy.
 
 [0.8.2] - 2026-10-23
 --------------------
