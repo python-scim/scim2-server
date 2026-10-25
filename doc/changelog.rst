@@ -10,8 +10,10 @@ Added
 
 Changed
 ^^^^^^^
-- :class:`~scim2_server.memory.InMemoryStorage` reads and searches faster. A search copies only
-  the resources of the returned page.
+- :class:`~scim2_server.memory.InMemoryStorage` reads, writes and searches faster. A search copies
+  only the resources of the returned page, and the unique values are indexed.
+- :class:`~scim2_server.memory.InMemoryStorage` compares unique values under the policy in effect
+  when they were written, so it serves the resources of a single policy.
 
 [0.8.2] - 2026-10-23
 --------------------

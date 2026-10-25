@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from scim2_models import URN
 from scim2_models import Attribute
 from scim2_models import CaseExact
+from scim2_models import ComplexAttribute
 from scim2_models import Extension
 from scim2_models import Filter
 from scim2_models import InvalidFilterException
@@ -220,6 +221,9 @@ def test_the_resources_can_be_replaced(user_type, scim_provider):
     assert storage.get(user_type, kept.id).user_name == "jsmith"
     with pytest.raises(NotFoundException):
         storage.get(user_type, former.id)
+    storage.create(user_type, User(user_name="bjensen"))
+    with pytest.raises(UniquenessException):
+        storage.create(user_type, User(user_name="jsmith"))
 
 
 def test_operations_can_be_nested(user_type, scim_provider):
@@ -375,6 +379,27 @@ def test_uniqueness_of_an_extension_spans_the_resources_it_extends():
             ResourceType.from_resource(Token[Tag]),
             Token[Tag].model_validate({"urn:example:2.0:Tag": {"code": "x"}}),
         )
+
+
+def test_multi_valued_and_complex_unique_values_clash_when_equal():
+    """Equal lists, or equal complex values, of a unique attribute clash."""
+
+    class Size(ComplexAttribute):
+        width: int | None = None
+
+    class Badge(Resource):
+        __schema__ = URN("urn:example:2.0:Badge")
+        codes: Annotated[list[str] | None, Uniqueness.server] = None
+        size: Annotated[Size | None, Uniqueness.server] = None
+
+    storage = InMemoryStorage()
+    badge_type = ResourceType.from_resource(Badge)
+    storage.create(badge_type, Badge(codes=["a", "b"], size=Size(width=1)))
+    storage.create(badge_type, Badge(codes=["a"], size=Size(width=2)))
+    with pytest.raises(UniquenessException):
+        storage.create(badge_type, Badge(codes=["a", "b"]))
+    with pytest.raises(UniquenessException):
+        storage.create(badge_type, Badge(size=Size(width=2)))
 
 
 @pytest.mark.parametrize("root", [False, True])

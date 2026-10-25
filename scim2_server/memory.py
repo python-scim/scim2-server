@@ -142,11 +142,40 @@ def _decode(value: Any) -> Any:
         raise InvalidCursorException from None
 
 
+Key = tuple[str | None, str]
+
+
+def _key(resource: Resource[Any]) -> Key:
+    """Return the resource type and the identifier a resource is stored under.
+
+    Per RFC 7643 §3.1, meta.resourceType holds the name of the resource
+    type, which may differ from its id.
+    """
+    assert resource.meta is not None
+    return resource.meta.resource_type, cast(str, resource.id)
+
+
+def _hashable(value: Any) -> Any:
+    """Return a form of a value that a dict can hold as a key.
+
+    Lists and models cannot be hashed, so they are held by their
+    representation.
+    """
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
+
+
 class InMemoryStorage(ScimStorage):
     """A storage keeping the resources in memory, for tests, debugging and demos.
 
     It is not optimized for performance: a search walks every resource. A
     lock serializes every access, so it can serve a threaded server.
+
+    It compares unique values under the policy in effect when they were
+    written, so it serves the resources of a single policy.
 
     :param clock: Return the date of a write, for ``meta.created`` and
         ``meta.lastModified``. Pass a fixed clock to get predictable dates.
@@ -156,6 +185,8 @@ class InMemoryStorage(ScimStorage):
 
     def __init__(self, clock: Callable[[], datetime.datetime] = utcnow) -> None:
         self._resources: dict[str | None, dict[str, Resource[Any]]] = {}
+        self._owners: dict[str, dict[Any, Key]] = {}
+        self._unique_values: dict[Key, dict[str, Any]] = {}
         self.clock = clock
         self.lock = RLock()
         self.versions = itertools.count(1)
@@ -172,8 +203,10 @@ class InMemoryStorage(ScimStorage):
     @resources.setter
     def resources(self, resources: list[Resource[Any]]) -> None:
         self._resources = {}
+        self._owners = {}
+        self._unique_values = {}
         for resource in resources:
-            self._store(resource)
+            self._store(resource, self._values_of(resource))
 
     def generate_id(self, resource_type: ResourceType, resource: Resource[Any]) -> str:
         """Return the identifier of a new resource.
@@ -246,8 +279,9 @@ class InMemoryStorage(ScimStorage):
                 last_modified=now,
                 version=self.next_version(),
             )
-            self._check_uniqueness(resource)
-            self._store(resource)
+            values = self._values_of(resource)
+            self._check_uniqueness(resource, values)
+            self._store(resource, values)
             return resource.model_copy(deep=True)
 
     def update(
@@ -270,8 +304,9 @@ class InMemoryStorage(ScimStorage):
                     "version": self.next_version(),
                 }
             )
-            self._check_uniqueness(updated)
-            self._store(updated)
+            values = self._values_of(updated)
+            self._check_uniqueness(updated, values)
+            self._store(updated, values)
             return updated.model_copy(deep=True)
 
     def delete(
@@ -285,16 +320,21 @@ class InMemoryStorage(ScimStorage):
             stored = self._stored(resource_type, resource_id)
             self._check_version(stored, expected_version)
             del self._resources[resource_type.name][resource_id]
+            self._release(_key(stored))
 
-    def _store(self, resource: Resource[Any]) -> None:
-        """Keep a resource under its resource type and its identifier.
+    def _store(self, resource: Resource[Any], values: dict[str, Any]) -> None:
+        """Keep a resource under its resource type and its identifier, and own its unique values."""
+        key = _key(resource)
+        self._resources.setdefault(key[0], {})[key[1]] = resource
+        self._release(key)
+        self._unique_values[key] = values
+        for urn, value in values.items():
+            self._owners.setdefault(urn, {})[value] = key
 
-        Per RFC 7643 §3.1, meta.resourceType holds the name of the resource
-        type, which may differ from its id.
-        """
-        assert resource.meta is not None
-        resources = self._resources.setdefault(resource.meta.resource_type, {})
-        resources[cast(str, resource.id)] = resource
+    def _release(self, key: Key) -> None:
+        """Free the unique values a resource owned."""
+        for urn, value in self._unique_values.pop(key, {}).items():
+            del self._owners[urn][value]
 
     def _stored(
         self, resource_type: ResourceType, resource_id: str | None
@@ -312,28 +352,38 @@ class InMemoryStorage(ScimStorage):
         if expected_version is not None and resource.meta.version != expected_version:
             raise PreconditionFailedException
 
-    def _check_uniqueness(self, resource: Resource[Any]) -> None:
-        """Refuse a resource sharing a unique value with another one of the same schema.
+    def _check_uniqueness(
+        self, resource: Resource[Any], values: dict[str, Any]
+    ) -> None:
+        """Refuse a resource sharing a unique value with another resource."""
+        key = _key(resource)
+        for urn, value in values.items():
+            if self._owners.get(urn, {}).get(value, key) != key:
+                raise UniquenessException()
+
+    def _values_of(self, resource: Resource[Any]) -> dict[str, Any]:
+        """Return the unique values of a resource, by the URN of their attribute.
 
         Per RFC 7643 erratum 8279, the uniqueness applies to the resources
         using the schema that declares the attribute, whatever their resource
-        type. A missing value never clashes, as a SQL NULL does not.
+        type. The URN of an attribute holds its schema, so two resources clash
+        when they hold the same value under the same URN. A missing value
+        never clashes, as a SQL NULL does not.
+
+        The values are compared under the policy of the write that stored
+        them, so a storage serves the resources of a single policy.
         """
         unique_paths = parametrize(Path, type(resource)).iter_paths(
             include_subattributes=False,
             uniqueness=[Uniqueness.server, Uniqueness.global_],
         )
+        values = {}
         for path in unique_paths:
             attribute = cast(AttributeBinding, path.resolve())
             value = self._unique_value(resource, attribute)
-            if value is None:
-                continue
-            for existing_resource in self.resources:
-                if (
-                    existing_resource.id != resource.id
-                    and self._unique_value(existing_resource, attribute) == value
-                ):
-                    raise UniquenessException()
+            if value is not None:
+                values[attribute.urn] = _hashable(value)
+        return values
 
     @staticmethod
     def _unique_value(resource: Resource[Any], attribute: AttributeBinding) -> Any:
