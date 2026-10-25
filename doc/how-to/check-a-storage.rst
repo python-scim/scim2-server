@@ -78,9 +78,9 @@ Run the suite
    .. code-block:: console
 
        $ pytest
-       ........................................................................ [ 75%]
-       ........................                                                 [100%]
-       96 passed in 6.09s
+       ........................................................................ [ 66%]
+       ....................................                                     [100%]
+       108 passed in 6.09s
 
 Skip what the storage does not support
 --------------------------------------
@@ -101,7 +101,7 @@ override the ``provider`` fixture. In its :class:`~scim2_models.ServiceProviderC
     SKIPPED [46] scim2_server/testing.py:216: The service does not support filtering
     SKIPPED [19] scim2_server/testing.py:216: The service does not support sorting
     SKIPPED [10] scim2_server/testing.py:216: The service does not support cursor pagination
-    ======================= 31 passed, 75 skipped in 6.57s =========================
+    ======================= 33 passed, 75 skipped in 6.57s =========================
 
 For a storage that cannot search several resource types at once, set
 :attr:`~scim2_server.testing.ScimStorageContract.supports_root_search` to :data:`False`:
@@ -114,7 +114,7 @@ For a storage that cannot search several resource types at once, set
     $ pytest -rs
     SKIPPED [2] scim2_server/testing.py:216: The service does not support searching at the root
     SKIPPED [10] scim2_server/testing.py:216: The service does not support cursor pagination
-    ======================= 94 passed, 12 skipped in 6.79s =========================
+    ======================= 96 passed, 12 skipped in 6.79s =========================
 
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
 and a sort with :class:`~scim2_models.InvalidPathException`. The suite skips the filters and the
@@ -123,8 +123,8 @@ sorts the storage refuses, and checks the others:
 .. code-block:: console
 
     $ pytest -rs
-    SKIPPED [11] scim2_server/testing.py:669: The storage refuses the search: Cannot filter on 'title'
-    SKIPPED [2] scim2_server/testing.py:669: The storage refuses the search: Cannot sort on 'title'
+    SKIPPED [11] scim2_server/testing.py:700: The storage refuses the search: Cannot filter on 'title'
+    SKIPPED [2] scim2_server/testing.py:700: The storage refuses the search: Cannot sort on 'title'
 
 The filters and the sorts search users with the attributes of the ``User`` resource type and of
 its enterprise extension. For a storage that does not store some of them, override

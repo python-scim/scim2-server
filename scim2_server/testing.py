@@ -501,6 +501,25 @@ class ScimStorageContract:
             storage.update(user_type, user)
         assert storage.get(user_type, user.id).user_name == "jsmith"
 
+    def test_update_frees_the_former_unique_values(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """A userName a resource gave up can be taken by another resource."""
+        (user,) = self.create_users(storage, user_type, user_model, "bjensen")
+        user.user_name = "babs"
+        storage.update(user_type, user)
+
+        self.create_users(storage, user_type, user_model, "bjensen")
+
+    def test_delete_frees_the_unique_values(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """The userName of a deleted resource can be taken by a new resource."""
+        (user,) = self.create_users(storage, user_type, user_model, "bjensen")
+        storage.delete(user_type, user.id)
+
+        self.create_users(storage, user_type, user_model, "bjensen")
+
     def test_search_a_resource_type(
         self,
         storage: Any,

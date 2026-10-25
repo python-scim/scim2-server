@@ -4,6 +4,10 @@ Changelog
 [Unreleased]
 ------------
 
+Added
+^^^^^
+- The storage contract checks that an update or a deletion frees the unique values of a resource.
+
 Changed
 ^^^^^^^
 - :class:`~scim2_server.memory.InMemoryStorage` reads and searches faster. A search copies only
