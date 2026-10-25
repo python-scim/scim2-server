@@ -202,18 +202,22 @@ class InMemoryStorage(ScimStorage):
     ) -> SearchPage:
         with self.lock:
             candidates = [
-                resource.model_copy(deep=True)
+                resource
                 for resource in self.resources
                 if any(self._is_of_type(resource, rt) for rt in resource_types)
             ]
 
-        scim_filter = search_request.filter
-        if scim_filter is not None and not scim_filter.models and candidates:
-            models = tuple(dict.fromkeys(type(r) for r in candidates))
-            scim_filter = parametrize(ScimFilter, Union[models])(str(scim_filter))  # noqa: UP007
+            scim_filter = search_request.filter
+            if scim_filter is not None and not scim_filter.models and candidates:
+                models = tuple(dict.fromkeys(type(r) for r in candidates))
+                scim_filter = parametrize(ScimFilter, Union[models])(str(scim_filter))  # noqa: UP007
 
-        found = [r for r in candidates if scim_filter is None or scim_filter.match(r)]
-        return _page(search_request, position, found)
+            found = [
+                r for r in candidates if scim_filter is None or scim_filter.match(r)
+            ]
+            page = _page(search_request, position, found)
+            page.resources = [r.model_copy(deep=True) for r in page.resources]
+            return page
 
     def create(
         self, resource_type: ResourceType, resource: Resource[Any]

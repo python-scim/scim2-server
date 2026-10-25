@@ -1,6 +1,14 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Changed
+^^^^^^^
+- :class:`~scim2_server.memory.InMemoryStorage` searches faster. It copies only the resources of
+  the returned page.
+
 [0.8.2] - 2026-10-23
 --------------------
 
