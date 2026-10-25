@@ -7,10 +7,12 @@ from pydantic import ValidationError
 from scim2_models import URN
 from scim2_models import Attribute
 from scim2_models import CaseExact
+from scim2_models import ComplexAttribute
 from scim2_models import Extension
 from scim2_models import Filter
 from scim2_models import InvalidFilterException
 from scim2_models import InvalidPathException
+from scim2_models import NotFoundException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import Schema
@@ -207,6 +209,87 @@ def test_versions_differ_within_the_same_instant(user_type, scim_provider):
     assert updated.meta.version != user.meta.version
 
 
+def found_user_names(storage, user_type, User, scim_filter):
+    page = storage.search([user_type], SearchRequest[User](filter=scim_filter))
+    return sorted(resource.user_name for resource in page.resources)
+
+
+def test_the_resources_can_be_replaced(user_type, scim_provider):
+    """Resources assigned to a storage can be read and searched, and the former ones are gone."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    former = storage.create(user_type, User(user_name="bjensen"))
+    kept = InMemoryStorage().create(user_type, User(user_name="jsmith"))
+    assert found_user_names(storage, user_type, User, 'userName eq "bjensen"') == [
+        "bjensen"
+    ]
+
+    storage.resources = [kept]
+
+    assert storage.get(user_type, kept.id).user_name == "jsmith"
+    with pytest.raises(NotFoundException):
+        storage.get(user_type, former.id)
+    assert found_user_names(storage, user_type, User, 'userName eq "bjensen"') == []
+    assert found_user_names(storage, user_type, User, 'userName eq "jsmith"') == [
+        "jsmith"
+    ]
+    storage.create(user_type, User(user_name="bjensen"))
+    with pytest.raises(UniquenessException):
+        storage.create(user_type, User(user_name="jsmith"))
+
+
+def test_an_equality_search_follows_the_writes(user_type, scim_provider):
+    """A search for an equal value finds the resources as they are after each write."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    user = storage.create(user_type, User(user_name="bjensen", external_id="a"))
+    assert found_user_names(storage, user_type, User, 'externalId eq "a"') == [
+        "bjensen"
+    ]
+
+    user.external_id = "b"
+    storage.update(user_type, user)
+    assert found_user_names(storage, user_type, User, 'externalId eq "a"') == []
+    assert found_user_names(storage, user_type, User, 'externalId eq "b"') == [
+        "bjensen"
+    ]
+
+    storage.create(user_type, User(user_name="jsmith", external_id="b"))
+    assert found_user_names(storage, user_type, User, 'externalId eq "b"') == [
+        "bjensen",
+        "jsmith",
+    ]
+
+    storage.delete(user_type, user.id)
+    assert found_user_names(storage, user_type, User, 'externalId eq "b"') == ["jsmith"]
+
+
+def test_an_equality_search_follows_the_case_exactness(user_type, scim_provider):
+    """A search for an equal value ignores the case unless the attribute is case-exact."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="bjensen", external_id="a"))
+
+    assert found_user_names(storage, user_type, User, 'userName eq "BJensen"') == [
+        "bjensen"
+    ]
+    assert found_user_names(storage, user_type, User, 'externalId eq "A"') == []
+
+
+def test_an_equality_search_for_a_value_the_policy_cannot_compare(
+    user_type, scim_provider
+):
+    """A search for a value the policy refuses finds nothing."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="bjensen!"))
+
+    with ScimPolicy(comparison_key=refuse_exclamation_marks):
+        assert (
+            found_user_names(storage, user_type, User, 'userName eq "bjensen!"') == []
+        )
+
+
 def test_operations_can_be_nested(user_type, scim_provider):
     """The lock of an operation can be taken again inside it."""
     storage = InMemoryStorage()
@@ -360,6 +443,27 @@ def test_uniqueness_of_an_extension_spans_the_resources_it_extends():
             ResourceType.from_resource(Token[Tag]),
             Token[Tag].model_validate({"urn:example:2.0:Tag": {"code": "x"}}),
         )
+
+
+def test_multi_valued_and_complex_unique_values_clash_when_equal():
+    """Equal lists, or equal complex values, of a unique attribute clash."""
+
+    class Size(ComplexAttribute):
+        width: int | None = None
+
+    class Badge(Resource):
+        __schema__ = URN("urn:example:2.0:Badge")
+        codes: Annotated[list[str] | None, Uniqueness.server] = None
+        size: Annotated[Size | None, Uniqueness.server] = None
+
+    storage = InMemoryStorage()
+    badge_type = ResourceType.from_resource(Badge)
+    storage.create(badge_type, Badge(codes=["a", "b"], size=Size(width=1)))
+    storage.create(badge_type, Badge(codes=["a"], size=Size(width=2)))
+    with pytest.raises(UniquenessException):
+        storage.create(badge_type, Badge(codes=["a", "b"]))
+    with pytest.raises(UniquenessException):
+        storage.create(badge_type, Badge(size=Size(width=2)))
 
 
 @pytest.mark.parametrize("root", [False, True])
