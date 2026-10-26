@@ -20,7 +20,7 @@ permissions:
 jobs:
   tests:
     name: py${{ matrix.python }} unit tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +45,7 @@ jobs:
 
   minversions:
     name: minimum dependency versions
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       UV_RESOLUTION: lowest-direct
       UV_LOCKED: 0
@@ -65,7 +65,7 @@ jobs:
         run: uv run pytest --showlocals
 
   style:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -80,7 +80,7 @@ jobs:
 
   container:
     name: container image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
@@ -111,7 +111,7 @@ jobs:
   all-checks:
     if: always()
     needs: [tests, minversions, style, container]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Fail if a needed job did not succeed
         if: >-
