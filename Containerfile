@@ -1,4 +1,4 @@
-FROM docker.io/astral/uv:0.12.13-python3.14-trixie-slim@sha256:d2525beeae88affd18389bf69292abf9b5cbbb3f5c5242b6da3d20e304959b37 AS builder
+FROM docker.io/astral/uv:0.13.0-python3.14-trixie-slim@sha256:8e70ac2e85d09a5bb7ef09753b80671a60a71c8d24f195e4890d71e03865e36d AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
