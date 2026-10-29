@@ -62,8 +62,8 @@ dev = [
     "aiosqlite>=0.22.1",
     "precis-i18n>=1.1.2",
     "mypy>=2.3.1",
-    "scim2-client>=0.12.0",
-    "scim2-tester>=0.5.1",
+    "scim2-client>=0.14.0",
+    "scim2-tester[testing]>=0.6.2",
     "werkzeug>=3.0.3",
     "cryptography>=50.0.1",
 ]
@@ -148,6 +148,7 @@ docstring-code-format = true
 addopts = "--doctest-modules --doctest-glob='*.rst' --ignore=doc/conf.py"
 pythonpath = ["doc/_examples"]
 doctest_optionflags= "ALLOW_UNICODE IGNORE_EXCEPTION_DETAIL ELLIPSIS"
+filterwarnings = ["error::scim2_tester.testing.ScimDeviationWarning"]
 
 [tool.tox]
 requires = ["tox>=4.19"]
