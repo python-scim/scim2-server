@@ -1,7 +1,39 @@
+from unittest.mock import patch
+
 import httpx2
+import pytest
 
 from scim2_server.applications.wsgi import ForwardedHeaders
 from scim2_server.applications.wsgi import WSGIApplication
+
+
+def test_an_unexpected_error_reaches_the_caller_when_exceptions_propagate(
+    storage, scim_provider
+):
+    """With propagate_exceptions, an unexpected exception is raised to the caller instead of answering 500."""
+    app = WSGIApplication(storage, scim_provider, propagate_exceptions=True)
+    with (
+        patch.object(
+            app.service, "service_provider_config", side_effect=RuntimeError("boom")
+        ),
+        httpx2.Client(
+            transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
+        ) as client,
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        client.get("/v2/ServiceProviderConfig")
+
+
+def test_a_scim_error_is_answered_when_exceptions_propagate(storage, scim_provider):
+    """With propagate_exceptions, a SCIM error still answers a SCIM error response."""
+    app = WSGIApplication(storage, scim_provider, propagate_exceptions=True)
+    with httpx2.Client(
+        transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"
+    ) as client:
+        r = client.get("/v2/Users/unknown")
+
+    assert r.status_code == 404
+    assert r.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
 
 
 def test_forwarded_headers_give_the_urls_of_the_client(storage, scim_provider):

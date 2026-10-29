@@ -86,6 +86,34 @@ def test_an_unexpected_error_answers_500(app):
     assert "secret" not in r.text
 
 
+def test_an_unexpected_error_reaches_the_caller_when_exceptions_propagate(
+    scim_provider,
+):
+    """With propagate_exceptions, an unexpected exception is raised to the caller instead of answering 500."""
+    app = ASGIApplication(
+        AsyncInMemoryStorage(), scim_provider, propagate_exceptions=True
+    )
+    with (
+        patch.object(
+            app.service, "service_provider_config", side_effect=RuntimeError("boom")
+        ),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        send(app, "GET", "/v2/ServiceProviderConfig")
+
+
+def test_a_scim_error_is_answered_when_exceptions_propagate(scim_provider):
+    """With propagate_exceptions, a SCIM error still answers a SCIM error response."""
+    app = ASGIApplication(
+        AsyncInMemoryStorage(), scim_provider, propagate_exceptions=True
+    )
+
+    r = send(app, "GET", "/v2/Users/unknown")
+
+    assert r.status_code == 404
+    assert r.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+
+
 def test_check_auth_refuses_a_request(scim_provider):
     """A request that check_auth refuses answers 401, but the configuration stays open."""
 

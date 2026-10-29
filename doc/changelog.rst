@@ -1,6 +1,17 @@
 Changelog
 =========
 
+[0.8.4] - Unreleased
+--------------------
+
+Added
+^^^^^
+- The ``propagate_exceptions`` parameter of
+  :class:`~scim2_server.applications.wsgi.WSGIApplication` and
+  :class:`~scim2_server.applications.asgi.ASGIApplication` raises the unexpected exceptions to the
+  caller, instead of answering 500. The SCIM errors still answer a SCIM error response. Enable it
+  in tests to see the traceback of a bug.
+
 [0.8.3] - 2026-10-25
 --------------------
 

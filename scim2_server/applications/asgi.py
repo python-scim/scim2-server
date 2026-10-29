@@ -32,6 +32,8 @@ class ASGIApplication(BaseApplication):
     :param storage: The storage of the resources.
     :param provider: The description of the service.
     :param service: The service serving the requests, built upon ``provider``.
+    :param propagate_exceptions: Whether an unexpected exception reaches the
+        caller of the application, instead of answering 500.
     """
 
     def __init__(
@@ -39,8 +41,10 @@ class ASGIApplication(BaseApplication):
         storage: AsyncScimStorage,
         provider: ScimProvider,
         service: ScimService | None = None,
+        *,
+        propagate_exceptions: bool = False,
     ):
-        super().__init__(provider, service)
+        super().__init__(provider, service, propagate_exceptions=propagate_exceptions)
         self.storage = storage
         self.handler = AsyncScimHandler(self.service, storage)
 
@@ -106,6 +110,8 @@ class ASGIApplication(BaseApplication):
         try:
             response = await self.dispatch_request(request)
         except Exception as exception:
+            if self._propagates(exception):
+                raise
             response = self.handle_exception(request, exception)
         return self.finalize_response(request, response)
 

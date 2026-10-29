@@ -23,16 +23,31 @@ class BaseApplication:
         :class:`~scim2_server.service.ScimService` of ``provider`` by default,
         whose secret comes from the ``SCIM2_SERVER_SECRET`` environment
         variable.
+    :param propagate_exceptions: Whether an unexpected exception reaches the
+        caller of the application, instead of answering 500. The
+        :class:`~scim2_models.SCIMException` still answer a SCIM error. Enable
+        it in tests, to see the traceback of a bug.
     """
 
-    def __init__(self, provider: ScimProvider, service: ScimService | None = None):
+    def __init__(
+        self,
+        provider: ScimProvider,
+        service: ScimService | None = None,
+        *,
+        propagate_exceptions: bool = False,
+    ):
         self.provider = provider
         self.service = (
             service
             if service is not None
             else ScimService(provider, secret=os.environ.get("SCIM2_SERVER_SECRET"))
         )
+        self.propagate_exceptions = propagate_exceptions
         self.log = logging.getLogger("scim2_server")
+
+    def _propagates(self, exception: Exception) -> bool:
+        """Tell whether an exception raised while serving a request reaches the caller."""
+        return self.propagate_exceptions and not isinstance(exception, SCIMException)
 
     @staticmethod
     def split_path(path: str) -> str:
