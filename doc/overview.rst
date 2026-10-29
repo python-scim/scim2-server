@@ -300,7 +300,7 @@ without a network:
 
 .. code-block:: console
 
-    $ pip install scim2-tester
+    $ pip install scim2-tester[testing]
 
 .. doctest::
 
@@ -313,6 +313,29 @@ without a network:
     >>> results = check_server(scim_client)
     >>> [result.title for result in results if result.status in (Status.ERROR, Status.CRITICAL)]
     []
+
+In the tests of a server, :class:`~scim2_tester.testing.ScimServerContract` runs the same checks
+as a pytest test, with a subtest per result. It needs the ``testing`` extra of scim2-tester.
+Subclass it, and give it a ``scim_client`` fixture. With ``propagate_exceptions``, a bug in the
+server raises its exception, and the test shows its traceback instead of a 500 response:
+
+.. code-block:: python
+
+    import pytest
+    from scim2_client.engines.wsgi import WSGISCIMClient
+    from scim2_tester.testing import ScimServerContract
+
+    from scim2_server.applications.wsgi import WSGIApplication
+    from scim2_server.utils import load_default_provider
+
+
+    class TestServer(ScimServerContract):
+        @pytest.fixture
+        def scim_client(self):
+            provider = load_default_provider()
+            storage = DatabaseStorage(provider)
+            app = WSGIApplication(storage, provider, propagate_exceptions=True)
+            return WSGISCIMClient(app, base_url="http://localhost/v2")
 
 A storage has its own test suite. Subclass
 :class:`~scim2_server.testing.ScimStorageContract` in the tests of the storage, and give it a
