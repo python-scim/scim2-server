@@ -10,6 +10,12 @@ Added
   credentials, and announces the Basic scheme in the service provider configuration. It can be
   repeated, and combined with ``--bearer-token``.
 
+Fixed
+^^^^^
+- Without credentials, the ``scim2-server`` command announces the bearer token scheme, unless the
+  configuration has its own schemes. The ``authenticationSchemes`` attribute of the service
+  provider configuration is required by :rfc:`RFC 7643 §5 <7643#section-5>`.
+
 [0.8.4] - 2026-10-29
 --------------------
 

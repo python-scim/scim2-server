@@ -9,6 +9,7 @@ from scim2_models import AuthenticationScheme
 from scim2_models import External
 from scim2_models import Reference
 from scim2_models import ScimProvider
+from scim2_models import ServiceProviderConfig
 from scim2_models import UnauthorizedException
 
 from scim2_server.applications.wsgi import WSGIApplication
@@ -29,6 +30,24 @@ BASIC_SCHEME = AuthenticationScheme(
     description="HTTP Basic",
     spec_uri=Reference[External]("https://datatracker.ietf.org/doc/html/rfc7617"),
 )
+
+
+def announce_authentication_schemes(
+    config: ServiceProviderConfig, bearer_token: bool, basic: bool
+) -> None:
+    """Add the schemes of the accepted credentials to a service provider configuration.
+
+    Without credentials, the application accepts any bearer token. If the
+    configuration has no scheme then, it announces the bearer token scheme,
+    because the ``authenticationSchemes`` attribute is required
+    (:rfc:`RFC 7643 §5 <7643#section-5>`).
+    """
+    schemes = list(config.authentication_schemes or [])
+    if bearer_token or not (basic or schemes):
+        schemes.append(BEARER_TOKEN_SCHEME)
+    if basic:
+        schemes.append(BASIC_SCHEME)
+    config.authentication_schemes = schemes
 
 
 def _equals(value: str, expected: str) -> bool:

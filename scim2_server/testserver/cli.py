@@ -20,9 +20,8 @@ from scim2_server.applications.wsgi import ForwardedHeaders
 from scim2_server.applications.wsgi import TenantDispatcher
 from scim2_server.memory import InMemoryStorage
 from scim2_server.service import ScimService
-from scim2_server.testserver.application import BASIC_SCHEME
-from scim2_server.testserver.application import BEARER_TOKEN_SCHEME
 from scim2_server.testserver.application import StaticCredentialsApplication
+from scim2_server.testserver.application import announce_authentication_schemes
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
@@ -190,17 +189,9 @@ def main() -> None:
                 json.load(args.service_provider_config)
             )
 
-    if args.bearer_token is not None:
-        config.authentication_schemes = [
-            *(config.authentication_schemes or []),
-            BEARER_TOKEN_SCHEME,
-        ]
-
-    if args.basic_auth is not None:
-        config.authentication_schemes = [
-            *(config.authentication_schemes or []),
-            BASIC_SCHEME,
-        ]
+    announce_authentication_schemes(
+        config, bool(args.bearer_token), bool(args.basic_auth)
+    )
 
     policy = None
     if args.precis:

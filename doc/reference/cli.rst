@@ -51,9 +51,13 @@ discovery endpoints:
 Require credentials
 -------------------
 
-Without credentials, every endpoint is open. Pass each accepted bearer token with
-``--bearer-token``, and each accepted user and password of :rfc:`HTTP Basic <7617>` with
-``--basic-auth``. Both options can be repeated, and can be combined. Each one announces its scheme
+Without credentials, every endpoint is open. The service provider configuration still announces
+the bearer token scheme, because :rfc:`RFC 7643 §5 <7643#section-5>` requires the
+``authenticationSchemes`` attribute. A configuration passed with ``--service-provider-config``
+keeps its own schemes.
+
+Pass each accepted bearer token with ``--bearer-token``, and each accepted user and password of
+:rfc:`HTTP Basic <7617>` with ``--basic-auth``. Both options can be repeated, and can be combined. Each one announces its scheme
 in the service provider configuration:
 
 .. code-block:: console
