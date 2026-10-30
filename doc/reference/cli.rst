@@ -48,19 +48,21 @@ discovery endpoints:
 
     $ scim2-server --schema schemas.json --resource-type resource-types.json
 
-Require a bearer token
-----------------------
+Require credentials
+-------------------
 
-Without bearer token, every endpoint is open. Pass each accepted token with
-``--bearer-token``. The option can be repeated, and announces the bearer token scheme in the
-service provider configuration:
+Without credentials, every endpoint is open. Pass each accepted bearer token with
+``--bearer-token``, and each accepted user and password of :rfc:`HTTP Basic <7617>` with
+``--basic-auth``. Both options can be repeated, and can be combined. Each one announces its scheme
+in the service provider configuration:
 
 .. code-block:: console
 
-    $ scim2-server --bearer-token s3cret
+    $ scim2-server --bearer-token s3cret --basic-auth alice:s3cret
 
-A request without :mdn:`Authorization` header gets a 401 response, with the
-``WWW-Authenticate: Bearer`` header. The ``/ServiceProviderConfig`` endpoint stays open.
+A request without valid credentials gets a 401 response. Its ``WWW-Authenticate`` header holds a
+``Bearer`` and a ``Basic`` challenge, one for each scheme in use. The ``/ServiceProviderConfig``
+endpoint stays open.
 
 Serve several tenants
 ---------------------
@@ -86,7 +88,7 @@ tenant creates it, with no resources:
     $ scim2-server --dynamic-tenants
 
 Each test of a test suite can then pick a random tenant, and get an empty server. Any client can
-create tenants, even without a valid bearer token, and every tenant stays in memory until the
+create tenants, even without valid credentials, and every tenant stays in memory until the
 server stops. Serve this option to trusted clients only.
 
 Compare the usernames with PRECIS
@@ -141,7 +143,7 @@ Pass ``--debug`` to log the WSGI environment of each request, with its headers.
 
 .. warning::
 
-   The logged environment holds the bearer tokens. Never use ``--debug`` on a server reachable by
+   The logged environment holds the credentials. Never use ``--debug`` on a server reachable by
    others.
 
 Options

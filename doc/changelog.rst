@@ -1,6 +1,15 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- The ``--basic-auth USER:PASSWORD`` option of the ``scim2-server`` command accepts HTTP Basic
+  credentials, and announces the Basic scheme in the service provider configuration. It can be
+  repeated, and combined with ``--bearer-token``.
+
 [0.8.4] - 2026-10-29
 --------------------
 

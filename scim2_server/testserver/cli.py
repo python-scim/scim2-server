@@ -20,8 +20,9 @@ from scim2_server.applications.wsgi import ForwardedHeaders
 from scim2_server.applications.wsgi import TenantDispatcher
 from scim2_server.memory import InMemoryStorage
 from scim2_server.service import ScimService
+from scim2_server.testserver.application import BASIC_SCHEME
 from scim2_server.testserver.application import BEARER_TOKEN_SCHEME
-from scim2_server.testserver.application import BearerTokenApplication
+from scim2_server.testserver.application import StaticCredentialsApplication
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
 from scim2_server.utils import load_default_service_provider_config
@@ -53,6 +54,14 @@ def log_environ(handler: "WSGIApplication") -> "WSGIApplication":
 def dump_resources(storage: InMemoryStorage) -> list[dict[str, Any]]:
     """Return the JSON representation of the resources of a storage."""
     return [r.model_dump() for r in storage.resources]
+
+
+def basic_credentials(value: str) -> tuple[str, str]:
+    """Split the ``USER:PASSWORD`` value of the ``--basic-auth`` option."""
+    user, separator, password = value.partition(":")
+    if not separator:
+        raise argparse.ArgumentTypeError("expected USER:PASSWORD")
+    return user, password
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,7 +97,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="TOKEN",
         help="Accept a static bearer token, and announce the bearer token scheme. "
-        "Can be repeated. Without it, the server accepts every request.",
+        "Can be repeated.",
+    )
+    parser.add_argument(
+        "--basic-auth",
+        action="append",
+        type=basic_credentials,
+        metavar="USER:PASSWORD",
+        help="Accept HTTP Basic credentials, and announce the Basic scheme. "
+        "Can be repeated. Without --bearer-token nor --basic-auth, the server "
+        "accepts every request.",
     )
     parser.add_argument(
         "--precis",
@@ -178,6 +196,12 @@ def main() -> None:
             BEARER_TOKEN_SCHEME,
         ]
 
+    if args.basic_auth is not None:
+        config.authentication_schemes = [
+            *(config.authentication_schemes or []),
+            BASIC_SCHEME,
+        ]
+
     policy = None
     if args.precis:
         try:
@@ -206,16 +230,17 @@ def main() -> None:
 
     storages: dict[str | None, InMemoryStorage] = {}
 
-    def make_application(tenant: str | None = None) -> BearerTokenApplication:
+    def make_application(tenant: str | None = None) -> StaticCredentialsApplication:
         storages[tenant] = InMemoryStorage()
-        return BearerTokenApplication(
+        return StaticCredentialsApplication(
             storages[tenant],
             provider,
             service=service,
             bearer_tokens=args.bearer_token or [],
+            basic_credentials=args.basic_auth or [],
         )
 
-    def make_tenant_application(tenant: str) -> BearerTokenApplication | None:
+    def make_tenant_application(tenant: str) -> StaticCredentialsApplication | None:
         if not args.dynamic_tenants and tenant not in args.tenant:
             return None
         return make_application(tenant)
