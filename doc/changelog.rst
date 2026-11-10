@@ -1,6 +1,15 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Fixed
+^^^^^
+- :class:`~scim2_server.applications.wsgi.WSGIApplication` and
+  :class:`~scim2_server.applications.asgi.ASGIApplication` no longer add a ``Location`` header to
+  error responses.
+
 [0.8.5] - 2026-10-30
 --------------------
 

@@ -113,7 +113,7 @@ def test_serve_returns_the_response_sent_to_the_client(storage, scim_provider):
 
     (response,) = app.responses
     assert response.status == 401
-    assert response.headers["Location"] == "https://scim.example.com/v2/Users"
+    assert response.headers["Cache-Control"] == "no-cache"
 
 
 @pytest.mark.parametrize(
@@ -139,3 +139,26 @@ def test_finalize_response_receives_every_response(
 
     assert r.status_code == status
     assert r.headers["X-Finalized"] == "yes"
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "location"),
+    [
+        (
+            "/v2/ServiceProviderConfig",
+            200,
+            "https://scim.example.com/v2/ServiceProviderConfig",
+        ),
+        ("/v2/Users/unknown", 404, None),
+        ("/v2/Unknown/path/to/nothing", 404, None),
+    ],
+)
+def test_only_successful_responses_have_a_default_location(
+    storage, scim_provider, path, status, location
+):
+    """A successful response gets the request URL as Location, an error response gets none."""
+    with client_of(WSGIApplication(storage, scim_provider)) as client:
+        r = client.get(path)
+
+    assert r.status_code == status
+    assert r.headers.get("Location") == location

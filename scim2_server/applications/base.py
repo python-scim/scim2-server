@@ -1,5 +1,6 @@
 import logging
 import os
+from http import HTTPStatus
 from typing import Any
 
 from scim2_models import SCIMException
@@ -113,7 +114,10 @@ class BaseApplication:
         client.
         """
         # RFC 7644 does not require a Location header on every response, but
-        # its examples include one even when no resource was created.
-        response.headers.setdefault("Location", request.url)
+        # its examples include one on successful responses, even when no
+        # resource was created. An error is not at the location of a resource.
+        if response.status < HTTPStatus.BAD_REQUEST:
+            response.headers.setdefault("Location", request.url)
+
         response.headers.setdefault("Cache-Control", "no-cache")
         return response
