@@ -4,6 +4,19 @@ Changelog
 [Unreleased]
 ------------
 
+Added
+^^^^^
+- The ``--oauth-issuer`` and ``--oauth-audience`` options of the ``scim2-server`` command accept
+  the OAuth JWT access tokens of :rfc:`9068`, and announce the ``oauth2`` scheme. The keys come
+  from the metadata of the issuer (:rfc:`8414`), or from ``--oauth-jwks-uri``. ``--oauth-scope``
+  requires a scope. The options need the ``oauth`` extra, and can be combined with
+  ``--bearer-token`` and ``--basic-auth``.
+
+Changed
+^^^^^^^
+- ``StaticCredentialsApplication`` is renamed ``CredentialsApplication``.
+- ``announce_authentication_schemes`` takes a required ``oauth`` parameter.
+
 Fixed
 ^^^^^
 - :class:`~scim2_server.applications.wsgi.WSGIApplication` and

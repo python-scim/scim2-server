@@ -20,7 +20,7 @@ from scim2_server.applications.wsgi import ForwardedHeaders
 from scim2_server.applications.wsgi import TenantDispatcher
 from scim2_server.memory import InMemoryStorage
 from scim2_server.service import ScimService
-from scim2_server.testserver.application import StaticCredentialsApplication
+from scim2_server.testserver.application import CredentialsApplication
 from scim2_server.testserver.application import announce_authentication_schemes
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
@@ -104,8 +104,31 @@ def build_parser() -> argparse.ArgumentParser:
         type=basic_credentials,
         metavar="USER:PASSWORD",
         help="Accept HTTP Basic credentials, and announce the Basic scheme. "
-        "Can be repeated. Without --bearer-token nor --basic-auth, the server "
-        "accepts every request.",
+        "Can be repeated. Without --bearer-token, --basic-auth nor --oauth-issuer, "
+        "the server accepts every request.",
+    )
+    parser.add_argument(
+        "--oauth-issuer",
+        metavar="URL",
+        help="Accept the OAuth JWT access tokens (RFC 9068) of this issuer, and "
+        "announce the oauth2 scheme. Needs --oauth-audience and the oauth extra.",
+    )
+    parser.add_argument(
+        "--oauth-audience",
+        metavar="VALUE",
+        help="Accept only the access tokens whose aud claim holds this value.",
+    )
+    parser.add_argument(
+        "--oauth-jwks-uri",
+        metavar="URL",
+        help="Check the signature of the access tokens with the keys of this "
+        "JWK set URL. Defaults to the jwks_uri of the metadata of the issuer.",
+    )
+    parser.add_argument(
+        "--oauth-scope",
+        metavar="SCOPE",
+        help="Accept only the access tokens with this scope. Several scopes "
+        "separated by spaces are all required.",
     )
     parser.add_argument(
         "--precis",
@@ -189,8 +212,34 @@ def main() -> None:
                 json.load(args.service_provider_config)
             )
 
+    if bool(args.oauth_issuer) != bool(args.oauth_audience):
+        parser.error("--oauth-issuer and --oauth-audience go together")
+
+    if (args.oauth_jwks_uri or args.oauth_scope) and not args.oauth_issuer:
+        parser.error("--oauth-jwks-uri and --oauth-scope need --oauth-issuer")
+
+    access_token_validator = None
+    if args.oauth_issuer:
+        try:
+            # Imported on demand, so that the server runs without the oauth extra.
+            from scim2_server.testserver.oauth import AccessTokenValidator
+        except ModuleNotFoundError:
+            parser.error(
+                "--oauth-issuer needs the oauth extra: pip install 'scim2-server[oauth]'"
+            )
+
+        access_token_validator = AccessTokenValidator(
+            args.oauth_issuer,
+            args.oauth_audience,
+            jwks_uri=args.oauth_jwks_uri,
+            scope=args.oauth_scope,
+        )
+
     announce_authentication_schemes(
-        config, bool(args.bearer_token), bool(args.basic_auth)
+        config,
+        bool(args.bearer_token),
+        bool(args.basic_auth),
+        access_token_validator is not None,
     )
 
     policy = None
@@ -221,17 +270,18 @@ def main() -> None:
 
     storages: dict[str | None, InMemoryStorage] = {}
 
-    def make_application(tenant: str | None = None) -> StaticCredentialsApplication:
+    def make_application(tenant: str | None = None) -> CredentialsApplication:
         storages[tenant] = InMemoryStorage()
-        return StaticCredentialsApplication(
+        return CredentialsApplication(
             storages[tenant],
             provider,
             service=service,
             bearer_tokens=args.bearer_token or [],
             basic_credentials=args.basic_auth or [],
+            access_token_validator=access_token_validator,
         )
 
-    def make_tenant_application(tenant: str) -> StaticCredentialsApplication | None:
+    def make_tenant_application(tenant: str) -> CredentialsApplication | None:
         if not args.dynamic_tenants and tenant not in args.tenant:
             return None
         return make_application(tenant)

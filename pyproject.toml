@@ -43,6 +43,9 @@ precis = [
 cursor = [
     "cryptography>=50.0.1",
 ]
+oauth = [
+    "authlib>=1.10.0b1",
+]
 
 [project.urls]
 repository = "https://github.com/python-scim/scim2-server"
@@ -66,6 +69,7 @@ dev = [
     "scim2-tester[testing]>=0.6.2",
     "werkzeug>=3.0.3",
     "cryptography>=50.0.1",
+    "authlib>=1.10.0b1",
 ]
 doc = [
     "shibuya>=2024.5.15",
@@ -79,7 +83,7 @@ doc = [
 [tool.uv]
 required-version = ">=0.12.13"
 exclude-newer = "14 days"
-exclude-newer-package = { scim2-models = false, scim2-client = false, scim2-server = false, scim2-cli = false, scim2-tester = false, pytest-scim2-server = false }
+exclude-newer-package = { scim2-models = false, scim2-client = false, scim2-server = false, scim2-cli = false, scim2-tester = false, pytest-scim2-server = false, authlib = false }
 
 [tool.uv.build-backend]
 module-root = ""
@@ -90,6 +94,10 @@ plugins = [
 ]
 files = ["scim2_server"]
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["authlib.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
