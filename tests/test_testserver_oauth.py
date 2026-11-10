@@ -6,6 +6,7 @@ from email.message import Message
 
 import httpx2
 import pytest
+from authlib.oauth2.rfc6750.errors import InvalidTokenError
 from joserfc import jwt
 from joserfc.jwk import ECKey
 from joserfc.jwk import KeySet
@@ -137,16 +138,25 @@ def test_a_valid_access_token_is_accepted(make_client, key, audience):
 
 
 @pytest.mark.parametrize(
-    "token",
+    ("token", "reason"),
     [
-        lambda key: make_token(key, exp=int(time.time()) - 60),
-        lambda key: make_token(key, aud="https://other.example.com"),
-        lambda key: make_token(key, iss="https://other.example.com"),
-        lambda key: make_token(key, typ="JWT"),
-        lambda key: make_token(key, client_id=None),
-        lambda key: make_token(make_key("first")),
-        lambda key: "not-a-jwt",
-        lambda key: "",
+        (
+            lambda key: make_token(key, exp=int(time.time()) - 60),
+            "The token is expired",
+        ),
+        (
+            lambda key: make_token(key, aud="https://other.example.com"),
+            "Invalid claim: 'aud'",
+        ),
+        (
+            lambda key: make_token(key, iss="https://other.example.com"),
+            "Invalid claim: 'iss'",
+        ),
+        (lambda key: make_token(key, typ="JWT"), "Invalid claim: 'typ'"),
+        (lambda key: make_token(key, client_id=None), "Missing claim: 'client_id'"),
+        (lambda key: make_token(make_key("first")), "bad_signature"),
+        (lambda key: "not-a-jwt", "Invalid JSON Web Signature"),
+        (lambda key: "", "Invalid JSON Web Signature"),
     ],
     ids=[
         "expired",
@@ -159,8 +169,8 @@ def test_a_valid_access_token_is_accepted(make_client, key, audience):
         "empty",
     ],
 )
-def test_an_invalid_access_token_is_refused(make_client, key, token):
-    """An invalid access token gets a 401 with the invalid_token error code (RFC 6750 §3.1)."""
+def test_an_invalid_access_token_is_refused(make_client, key, token, reason):
+    """An invalid access token gets a 401 with the invalid_token error code (RFC 6750 §3.1), and the reason."""
     r = make_client().get("/v2/Users", headers=bearer(token(key)))
 
     assert r.status_code == 401
@@ -168,6 +178,28 @@ def test_an_invalid_access_token_is_refused(make_client, key, token):
         'Bearer realm="SCIM", error="invalid_token", error_description='
     )
     assert r.json()["status"] == "401"
+    assert r.json()["detail"] == f"Invalid access token: {reason}"
+
+
+def test_an_invalid_access_token_without_jose_reason_gets_the_oauth_reason(
+    make_client, server, key
+):
+    """When authlib refuses a token by itself, the detail gives the OAuth description of invalid_token."""
+
+    class RevokingValidator(AccessTokenValidator):
+        def authenticate_token(self, token_string):
+            raise InvalidTokenError()
+
+    validator = RevokingValidator(ISSUER, AUDIENCE, JWKS_URI, fetch=server.fetch)
+    client = make_client(access_token_validator=validator)
+
+    r = client.get("/v2/Users", headers=bearer(make_token(key)))
+
+    assert r.status_code == 401
+    assert r.json()["detail"] == (
+        "Invalid access token: The access token provided is expired, revoked, "
+        "malformed, or invalid for other reasons."
+    )
 
 
 @pytest.mark.parametrize(
@@ -257,21 +289,24 @@ def test_a_token_without_key_id_does_not_download_the_keys_again(
     [
         {"failure": urllib.error.URLError("connection refused")},
         {"document": {"error": "realm not ready"}},
+        {"document": {"keys": [{"kty": "unknown"}]}},
     ],
-    ids=["unreachable", "not a JWK set"],
+    ids=["unreachable", "not a JWK set", "unknown key type"],
 )
 def test_the_keys_are_downloaded_once_the_authorization_server_is_up(
     make_client, server, key, unavailable
 ):
-    """Without the keys, the server answers 500, not 401, and downloads them again with the next token."""
+    """Without the keys, the server is unavailable, not the token invalid, and downloads them again with the next token."""
     client = make_client()
     for name, value in unavailable.items():
         setattr(server, name, value)
 
     r = client.get("/v2/Users", headers=bearer(make_token(key)))
 
-    assert r.status_code == 500
+    assert r.status_code == 503
+    assert r.headers["Retry-After"] == "5"
     assert "WWW-Authenticate" not in r.headers
+    assert r.json()["detail"].startswith(f"The keys of {ISSUER} cannot be downloaded: ")
 
     server.failure = server.document = None
     r = client.get("/v2/Users", headers=bearer(make_token(key)))
@@ -289,7 +324,7 @@ def test_a_failed_key_rotation_keeps_the_keys(make_client, validator, server, ke
 
     r = client.get("/v2/Users", headers=bearer(make_token(make_key("second"))))
 
-    assert r.status_code == 500
+    assert r.status_code == 503
     assert client.get("/v2/Users", headers=bearer(make_token(key))).status_code == 200
 
 
@@ -313,6 +348,7 @@ def test_the_access_token_needs_the_scope(make_client, server, key, scope, statu
             'Bearer realm="SCIM", error="insufficient_scope", scope="scim"'
         )
         assert r.json()["status"] == "403"
+        assert r.json()["detail"] == "The access token does not have the 'scim' scope"
 
 
 def test_static_bearer_tokens_and_access_tokens_are_both_accepted(make_client, key):
@@ -459,15 +495,15 @@ def test_the_metadata_are_downloaded_once(
     ],
     ids=["other issuer", "without issuer", "without jwks_uri", "no metadata"],
 )
-def test_unusable_metadata_are_a_server_error(
+def test_unusable_metadata_make_the_server_unavailable(
     discovering_client, server, key, metadata
 ):
-    """Metadata of another issuer, without jwks_uri, or missing, give a 500, and are fetched again with the next token."""
+    """Metadata of another issuer, without jwks_uri, or missing, give a 503, and are fetched again with the next token."""
     server.metadata = {RFC8414_URL: metadata} if metadata else {}
 
     r = discovering_client.get("/v2/Users", headers=bearer(make_token(key)))
 
-    assert r.status_code == 500
+    assert r.status_code == 503
     server.metadata = {RFC8414_URL: {"issuer": ISSUER, "jwks_uri": JWKS_URI}}
     r = discovering_client.get("/v2/Users", headers=bearer(make_token(key)))
     assert r.status_code == 200

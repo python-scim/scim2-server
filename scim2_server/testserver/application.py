@@ -10,6 +10,7 @@ from scim2_models import AuthenticationScheme
 from scim2_models import External
 from scim2_models import ForbiddenException
 from scim2_models import Reference
+from scim2_models import SCIMException
 from scim2_models import ScimProvider
 from scim2_models import ServiceProviderConfig
 from scim2_models import UnauthorizedException
@@ -76,9 +77,20 @@ class InvalidAccessTokenException(UnauthorizedException):
     (:rfc:`RFC 6750 §3 <6750#section-3>`).
     """
 
-    def __init__(self, challenge: str):
-        super().__init__()
+    def __init__(self, challenge: str, detail: str | None = None):
+        super().__init__(detail=detail)
         self.challenge = challenge
+
+
+class AuthorizationServerUnavailableException(SCIMException):
+    """A 503 error when the metadata or the keys of the OAuth issuer cannot be downloaded.
+
+    Its response carries a :mdn:`Retry-After` header, so that the client
+    sends the request again later (:rfc:`RFC 9110 §15.6.4 <9110#section-15.6.4>`).
+    """
+
+    status = 503
+    retry_after = 5
 
 
 class InsufficientScopeException(ForbiddenException):
@@ -88,8 +100,8 @@ class InsufficientScopeException(ForbiddenException):
     (:rfc:`RFC 6750 §3 <6750#section-3>`).
     """
 
-    def __init__(self, challenge: str):
-        super().__init__()
+    def __init__(self, challenge: str, detail: str | None = None):
+        super().__init__(detail=detail)
         self.challenge = challenge
 
 
@@ -159,12 +171,15 @@ class CredentialsApplication(WSGIApplication):
     def handle_exception(
         self, request: ScimRequest, exception: Exception
     ) -> ScimResponse:
-        """Return the error response, with the Bearer challenge of an access token error.
+        """Return the error response, with the headers of an access token error.
 
         The 401 response of an invalid access token keeps the challenges of
         the other schemes.
         """
         response = super().handle_exception(request, exception)
+        if isinstance(exception, AuthorizationServerUnavailableException):
+            response.headers["Retry-After"] = str(exception.retry_after)
+
         if isinstance(exception, InsufficientScopeException):
             response.headers["WWW-Authenticate"] = exception.challenge
 

@@ -12,9 +12,11 @@ from typing import Any
 from authlib.oauth2.rfc6750.errors import InsufficientScopeError
 from authlib.oauth2.rfc6750.errors import InvalidTokenError
 from authlib.oauth2.rfc9068 import JWTBearerTokenValidator
+from joserfc.errors import JoseError
 from joserfc.jwk import GuestProtocol
 from joserfc.jwk import KeySet
 
+from scim2_server.testserver.application import AuthorizationServerUnavailableException
 from scim2_server.testserver.application import InsufficientScopeException
 from scim2_server.testserver.application import InvalidAccessTokenException
 
@@ -44,6 +46,14 @@ def metadata_urls(issuer: str) -> tuple[str, str]:
         (scheme, netloc, f"/.well-known/oauth-authorization-server{path}", "", "")
     )
     return rfc8414, f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+
+
+def _reason(error: InvalidTokenError) -> str:
+    cause = error.__cause__
+    if isinstance(cause, JoseError):
+        return cause.description or cause.error
+
+    return str(error.get_error_description())
 
 
 class AccessTokenValidator(JWTBearerTokenValidator):  # type: ignore[misc]
@@ -82,10 +92,25 @@ class AccessTokenValidator(JWTBearerTokenValidator):  # type: ignore[misc]
         with self.lock:
             if self.keys is None or self.needs_download(self.keys, token):
                 self.downloaded_at = time.monotonic()
-                self.jwks_uri = self.jwks_uri or self.discover_jwks_uri()
-                self.keys = KeySet.import_key_set(self.fetch(self.jwks_uri))
+                self.keys = self.download_keys()
 
             return self.keys
+
+    def download_keys(self) -> KeySet:
+        """Download the keys of the issuer.
+
+        :raises ~scim2_server.testserver.application.AuthorizationServerUnavailableException:
+            When the metadata or the keys cannot be downloaded or read.
+        """
+        try:
+            self.jwks_uri = self.jwks_uri or self.discover_jwks_uri()
+            return KeySet.import_key_set(self.fetch(self.jwks_uri))
+        except Exception as error:
+            # A network error, or a document that holds no metadata or no keys:
+            # the token itself may be valid, so it must not get a 401.
+            raise AuthorizationServerUnavailableException(
+                detail=f"The keys of {self.issuer} cannot be downloaded: {error}"
+            ) from error
 
     def discover_jwks_uri(self) -> str:
         """Return the URL of the keys, from the metadata of the issuer.
@@ -126,9 +151,14 @@ class AccessTokenValidator(JWTBearerTokenValidator):  # type: ignore[misc]
             self.validate_token(token, scopes, None)
         except InvalidTokenError as error:
             challenge = dict(error.get_headers())["WWW-Authenticate"]
-            raise InvalidAccessTokenException(challenge) from error
+            raise InvalidAccessTokenException(
+                challenge, detail=f"Invalid access token: {_reason(error)}"
+            ) from error
         except InsufficientScopeError as error:
             challenge = (
                 f'Bearer realm="SCIM", error="{error.error}", scope="{self.scope}"'
             )
-            raise InsufficientScopeException(challenge) from error
+            raise InsufficientScopeException(
+                challenge,
+                detail=f"The access token does not have the {self.scope!r} scope",
+            ) from error

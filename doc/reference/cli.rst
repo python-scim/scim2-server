@@ -119,10 +119,13 @@ The responses follow :rfc:`RFC 6750 §3 <6750#section-3>`:
 - A request without access token gets a 401 response, with a ``Bearer`` challenge without error
   code.
 - An invalid or expired access token gets a 401 response, with the ``invalid_token`` error code.
-  The client can then request a new token.
+  The client can then request a new token. The ``detail`` of the SCIM error tells why the token
+  is refused, such as ``Invalid access token: Invalid claim: 'aud'``.
 - An access token without the scope gets a 403 response, with the ``insufficient_scope`` error
   code.
-- When the metadata or the keys cannot be downloaded, the server answers 500.
+- When the metadata or the keys cannot be downloaded, the server answers 503, with a
+  ``Retry-After`` header of 5 seconds. The client can send the request again later, with the
+  same token.
 
 The OAuth options can be combined with ``--bearer-token`` and ``--basic-auth``.
 
