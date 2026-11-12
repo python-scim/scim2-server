@@ -7,7 +7,8 @@ from scim2_models import AuthenticationScheme
 from scim2_server.memory import InMemoryStorage
 from scim2_server.testserver.application import BASIC_SCHEME
 from scim2_server.testserver.application import BEARER_TOKEN_SCHEME
-from scim2_server.testserver.application import StaticCredentialsApplication
+from scim2_server.testserver.application import OAUTH2_SCHEME
+from scim2_server.testserver.application import CredentialsApplication
 from scim2_server.testserver.application import announce_authentication_schemes
 from scim2_server.utils import load_default_provider
 from scim2_server.utils import load_default_service_provider_config
@@ -27,7 +28,7 @@ def make_client():
             *([BEARER_TOKEN_SCHEME] if bearer_tokens else []),
             *([BASIC_SCHEME] if basic_credentials else []),
         ]
-        app = StaticCredentialsApplication(
+        app = CredentialsApplication(
             InMemoryStorage(),
             provider,
             bearer_tokens=bearer_tokens,
@@ -159,22 +160,24 @@ def test_bearer_tokens_and_basic_credentials_are_both_accepted(make_client):
 
 
 CUSTOM_SCHEME = AuthenticationScheme(
-    type=AuthenticationScheme.Type.oauth2, name="oauth2", description="OAuth 2.0"
+    type=AuthenticationScheme.Type.httpdigest, name="digest", description="Digest"
 )
 
 
 @pytest.mark.parametrize(
-    ("configured", "bearer_token", "basic", "announced"),
+    ("configured", "bearer_token", "basic", "oauth", "announced"),
     [
-        ([], False, False, [BEARER_TOKEN_SCHEME]),
-        ([], True, False, [BEARER_TOKEN_SCHEME]),
-        ([], False, True, [BASIC_SCHEME]),
-        ([], True, True, [BEARER_TOKEN_SCHEME, BASIC_SCHEME]),
-        ([CUSTOM_SCHEME], False, False, [CUSTOM_SCHEME]),
+        ([], False, False, False, [BEARER_TOKEN_SCHEME]),
+        ([], True, False, False, [BEARER_TOKEN_SCHEME]),
+        ([], False, True, False, [BASIC_SCHEME]),
+        ([], False, False, True, [OAUTH2_SCHEME]),
+        ([], True, True, True, [BEARER_TOKEN_SCHEME, BASIC_SCHEME, OAUTH2_SCHEME]),
+        ([CUSTOM_SCHEME], False, False, False, [CUSTOM_SCHEME]),
         (
             [CUSTOM_SCHEME],
             True,
             True,
+            False,
             [CUSTOM_SCHEME, BEARER_TOKEN_SCHEME, BASIC_SCHEME],
         ),
     ],
@@ -182,17 +185,20 @@ CUSTOM_SCHEME = AuthenticationScheme(
         "no credentials",
         "bearer token",
         "basic",
-        "both",
+        "oauth",
+        "all",
         "configured scheme without credentials",
         "configured scheme with credentials",
     ],
 )
-def test_announced_authentication_schemes(configured, bearer_token, basic, announced):
+def test_announced_authentication_schemes(
+    configured, bearer_token, basic, oauth, announced
+):
     """The configuration announces the schemes of the credentials, and at least one scheme."""
     config = load_default_service_provider_config()
     config.authentication_schemes = configured
 
-    announce_authentication_schemes(config, bearer_token, basic)
+    announce_authentication_schemes(config, bearer_token, basic, oauth)
 
     assert config.authentication_schemes == announced
 
@@ -200,8 +206,8 @@ def test_announced_authentication_schemes(configured, bearer_token, basic, annou
 def test_the_default_configuration_announces_a_scheme_without_credentials():
     """Without credentials, the served configuration still holds the required authenticationSchemes."""
     provider = load_default_provider()
-    announce_authentication_schemes(provider.config, False, False)
-    app = StaticCredentialsApplication(InMemoryStorage(), provider)
+    announce_authentication_schemes(provider.config, False, False, False)
+    app = CredentialsApplication(InMemoryStorage(), provider)
 
     with httpx2.Client(
         transport=httpx2.WSGITransport(app=app), base_url="https://scim.example.com"

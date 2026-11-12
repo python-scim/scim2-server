@@ -68,13 +68,78 @@ A request without valid credentials gets a 401 response. Its ``WWW-Authenticate`
 ``Bearer`` and a ``Basic`` challenge, one for each scheme in use. The ``/ServiceProviderConfig``
 endpoint stays open.
 
+Accept OAuth access tokens
+--------------------------
+
+The server can act as an OAuth resource server. It then accepts the JWT access tokens of
+:rfc:`9068` that an authorization server issues. Pass the issuer of the tokens and the audience of
+the server. The options need the ``oauth`` extra:
+
+.. code-block:: console
+
+    $ pip install 'scim2-server[oauth]'
+    $ scim2-server \
+        --oauth-issuer https://auth.example.com/realms/apps \
+        --oauth-audience https://scim.example.com
+
+The server finds the public keys of the issuer with the ``jwks_uri`` of its metadata. It reads
+the metadata of :rfc:`RFC 8414 §3 <8414#section-3>` first, then the ones of
+`OpenID Connect Discovery <https://openid.net/specs/openid-connect-discovery-1_0.html>`_. The
+issuer of the metadata must be the issuer of the tokens.
+
+When the server cannot reach the issuer URL, pass the URL of the keys with ``--oauth-jwks-uri``.
+For instance, a server in a container may reach the authorization server under another host
+name than the one of the issuer:
+
+.. code-block:: console
+
+    $ scim2-server \
+        --oauth-issuer http://localhost:8080/realms/apps \
+        --oauth-audience https://scim.example.com \
+        --oauth-jwks-uri http://keycloak:8080/realms/apps/protocol/openid-connect/certs
+
+The service provider configuration announces the ``oauth2`` scheme. An access token is accepted
+when:
+
+- its ``typ`` header is ``at+jwt``;
+- one of the keys of the JWK set signs it;
+- its ``iss`` claim is the issuer, and its ``aud`` claim holds the audience;
+- it is not expired;
+- it has the ``sub``, ``client_id``, ``iat`` and ``jti`` claims.
+
+Pass ``--oauth-scope`` to also require a scope. Several scopes separated by spaces are all
+required.
+
+The server downloads the metadata and the keys with the first token, then keeps them. A token
+signed with an unknown key downloads the keys again, at most once a minute. The server can thus
+start before the authorization server.
+
+The responses follow :rfc:`RFC 6750 §3 <6750#section-3>`:
+
+- A request without access token gets a 401 response, with a ``Bearer`` challenge without error
+  code.
+- An invalid or expired access token gets a 401 response, with the ``invalid_token`` error code.
+  The client can then request a new token. The ``detail`` of the SCIM error tells why the token
+  is refused, such as ``Invalid access token: Invalid claim: 'aud'``.
+- An access token without the scope gets a 403 response, with the ``insufficient_scope`` error
+  code.
+- When the metadata or the keys cannot be downloaded, the server answers 503, with a
+  ``Retry-After`` header of 5 seconds. The client can send the request again later, with the
+  same token.
+
+The OAuth options can be combined with ``--bearer-token`` and ``--basic-auth``.
+
+With Keycloak, set the ``access.token.header.type.rfc9068`` attribute of the client to ``true``.
+Otherwise the ``typ`` header of the tokens is ``JWT``, and they are refused. Add an *Audience*
+mapper, so that the ``aud`` claim holds the audience of the server.
+
 Serve several tenants
 ---------------------
 
 A tenant is an independent set of resources. The first segment of the URL path selects it, with
 the URL prefix method of :rfc:`RFC 7644 §6.1 <7644#section-6.1>`: ``/a/v2/Users``
 and ``/b/v2/Users`` hold separate users. The schemas, the resource types, the configuration
-and the bearer tokens are shared.
+and the credentials are shared.
 
 Pass each tenant with ``--tenant``:
 

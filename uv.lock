@@ -14,6 +14,7 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P14D"
 
 [options.exclude-newer-package]
+authlib = false
 pytest-scim2-server = false
 scim2-cli = false
 scim2-client = false
@@ -123,6 +124,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/83/6607060659998f00afdea0d8375c1e6e2b7d515ab905090d9a5a02f48851/ast_serialize-0.13.1-cp39-abi3-win32.whl", hash = "sha256:4f98da562e5901d69c7dd30885594c5438f859edf354e9ac7517d188fb026c3a", size = 1131889, upload-time = "2026-10-17T00:04:12.953Z" },
     { url = "https://files.pythonhosted.org/packages/9f/6f/bafd6490fe7b355627fabe95f4417e3d02da93102c8552550eb9a0774e1e/ast_serialize-0.13.1-cp39-abi3-win_amd64.whl", hash = "sha256:ddf7cbc9c8abf70102c4a088efe154bb86bfb825b0a10e556d2b15972cf99bd7", size = 1171153, upload-time = "2026-10-17T00:04:14.362Z" },
     { url = "https://files.pythonhosted.org/packages/11/25/4235f4b375a67a37ac595bf478a5407a744eaf7b64113c1c3a5432b8d954/ast_serialize-0.13.1-cp39-abi3-win_arm64.whl", hash = "sha256:48f11d96c9ec71119612f8e79a8c55c12f2b136716d68347433c561d27a25f43", size = 1139035, upload-time = "2026-10-17T00:04:15.767Z" },
+]
+
+[[package]]
+name = "authlib"
+version = "1.10.0b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "joserfc" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/6e/f0dbb933139ab8a55b50d27390e3c9b30611568e87df71934dbad8c10370/authlib-1.10.0b1.tar.gz", hash = "sha256:76b552ad6ff7b24cde68031b14cb8ba80e75259b87ea52cb5222e098be00d0a4", size = 233462, upload-time = "2026-11-12T15:37:56.273Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/2c/b47e939ad0f1fa21554c8851ca0105b00c6a1875e768d49369f92e9019a9/authlib-1.10.0b1-py3-none-any.whl", hash = "sha256:7f74d622e802d528d244737165f9054908ae356992c397f24880bdc57809bdb4", size = 327120, upload-time = "2026-11-12T15:37:54.394Z" },
 ]
 
 [[package]]
@@ -728,6 +742,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67", size = 134899, upload-time = "2025-03-05T20:05:00.369Z" },
+]
+
+[[package]]
+name = "joserfc"
+version = "1.7.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/15/48ff246732232d35ee234228def22b52455fcc55577f06146602399a29b0/joserfc-1.7.7.tar.gz", hash = "sha256:471d0fd12a5a0d1c0942de280f39efe6f597878315033270b504d4d006d25510", size = 237446, upload-time = "2026-10-19T00:30:29.974Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/9f/934db284aa22f37af59708e382903860d4b81329c137b1b0ed2745daeb65/joserfc-1.7.7-py3-none-any.whl", hash = "sha256:06979cfbab78bc802f14c0358f32969826cc26720e13cb38926ffdc86bc0cb2c", size = 71758, upload-time = "2026-10-19T00:30:28.498Z" },
 ]
 
 [[package]]
@@ -1467,6 +1493,9 @@ dependencies = [
 cursor = [
     { name = "cryptography" },
 ]
+oauth = [
+    { name = "authlib" },
+]
 precis = [
     { name = "precis-i18n" },
 ]
@@ -1477,6 +1506,7 @@ testing = [
 [package.dev-dependencies]
 dev = [
     { name = "aiosqlite" },
+    { name = "authlib" },
     { name = "cryptography" },
     { name = "httpx2" },
     { name = "mypy" },
@@ -1502,16 +1532,18 @@ doc = [
 
 [package.metadata]
 requires-dist = [
+    { name = "authlib", marker = "extra == 'oauth'", specifier = ">=1.10.0b1" },
     { name = "cryptography", marker = "extra == 'cursor'", specifier = ">=50.0.1" },
     { name = "precis-i18n", marker = "extra == 'precis'", specifier = ">=1.1.2" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "scim2-models", specifier = ">=0.12.2" },
 ]
-provides-extras = ["testing", "precis", "cursor"]
+provides-extras = ["testing", "precis", "cursor", "oauth"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
+    { name = "authlib", specifier = ">=1.10.0b1" },
     { name = "cryptography", specifier = ">=50.0.1" },
     { name = "httpx2", specifier = ">=2.0.0" },
     { name = "mypy", specifier = ">=2.3.1" },
