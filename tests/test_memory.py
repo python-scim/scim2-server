@@ -46,6 +46,47 @@ class TestAsyncInMemoryStorage(AsyncScimStorageContract):
         return AsyncInMemoryStorage()
 
 
+class StorageWithoutDates(InMemoryStorage):
+    """Leave out the dates the storage does not store."""
+
+    def __init__(self, stores_created, stores_last_modified):
+        super().__init__()
+        self.stores_created = stores_created
+        self.stores_last_modified = stores_last_modified
+
+    def _store(self, resource, values):
+        if not self.stores_created:
+            resource.meta.created = None
+        if not self.stores_last_modified:
+            resource.meta.last_modified = None
+        super()._store(resource, values)
+
+
+class TestStorageWithoutDates(ScimStorageContract):
+    """The contract checks that a storage without dates leaves them empty."""
+
+    stores_created = False
+    stores_last_modified = False
+
+    @pytest.fixture
+    def storage(self):
+        return StorageWithoutDates(self.stores_created, self.stores_last_modified)
+
+
+class TestStorageWithoutCreationDate(TestStorageWithoutDates):
+    """The contract checks the modification date of a storage without creation date."""
+
+    stores_created = False
+    stores_last_modified = True
+
+
+class TestStorageWithoutModificationDate(TestStorageWithoutDates):
+    """The contract checks the creation date of a storage without modification date."""
+
+    stores_created = True
+    stores_last_modified = False
+
+
 def test_async_storage_serves_the_resources_of_a_given_storage(
     user_type, scim_provider
 ):

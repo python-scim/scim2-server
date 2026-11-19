@@ -167,6 +167,19 @@ class ScimStorageContract:
     :class:`~scim2_models.NotImplementedException` in that case.
     """
 
+    stores_created: bool = True
+    """Whether the storage stores ``meta.created``.
+
+    Set it to :data:`False` for a storage that leaves ``meta.created`` empty.
+    """
+
+    stores_last_modified: bool = True
+    """Whether the storage stores ``meta.lastModified``.
+
+    Set it to :data:`False` for a storage that leaves ``meta.lastModified``
+    empty.
+    """
+
     @pytest.fixture
     def provider(self) -> ScimProvider:
         """Return the description of the service the storage serves."""
@@ -248,15 +261,28 @@ class ScimStorageContract:
     def test_create_fills_the_identifier_and_the_meta(
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
-        """A created resource gets an id, its resource type, its dates and a version, but no location."""
+        """A created resource gets an id, its resource type and a version, but no location."""
         (user,) = self.create_users(storage, user_type, user_model, "bjensen")
 
         assert user.id
         assert user.meta.resource_type == user_type.name
-        assert user.meta.created is not None
-        assert user.meta.last_modified == user.meta.created
         assert user.meta.version
         assert user.meta.location is None
+
+    def test_create_fills_the_stored_dates(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """A created resource gets the dates the storage stores, and only them.
+
+        Per :rfc:`RFC 7643 §3.1 <7643#section-3.1>`, ``lastModified`` is
+        ``created`` until the resource changes.
+        """
+        (user,) = self.create_users(storage, user_type, user_model, "bjensen")
+
+        assert (user.meta.created is not None) is self.stores_created
+        assert (user.meta.last_modified is not None) is self.stores_last_modified
+        if self.stores_created and self.stores_last_modified:
+            assert user.meta.last_modified == user.meta.created
 
     def test_create_does_not_change_the_given_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any
@@ -294,6 +320,8 @@ class ScimStorageContract:
 
         stored = storage.get(user_type, user.id)
         assert stored.user_name == "bjensen"
+        assert stored.meta.created == user.meta.created
+        assert stored.meta.last_modified == user.meta.last_modified
         assert stored.meta.version == user.meta.version
 
     def test_get_returns_a_copy(
@@ -374,7 +402,7 @@ class ScimStorageContract:
     def test_update_replaces_the_stored_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
-        """An update stores the new state, keeps the creation date, and changes the version."""
+        """An update stores the new state, and changes the version."""
         (user,) = self.create_users(storage, user_type, user_model, "bjensen")
         user.display_name = "Barbara"
 
@@ -382,10 +410,22 @@ class ScimStorageContract:
 
         assert updated.display_name == "Barbara"
         assert storage.get(user_type, user.id).display_name == "Barbara"
-        assert updated.meta.created == user.meta.created
-        assert updated.meta.last_modified >= user.meta.created
         assert updated.meta.version != user.meta.version
         assert updated.meta.location is None
+
+    def test_update_keeps_the_creation_date(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """An update keeps the creation date, and does not move the modification date back."""
+        (user,) = self.create_users(storage, user_type, user_model, "bjensen")
+        user.display_name = "Barbara"
+
+        updated = storage.update(user_type, user)
+
+        assert updated.meta.created == user.meta.created
+        assert (updated.meta.last_modified is not None) is self.stores_last_modified
+        if self.stores_last_modified:
+            assert updated.meta.last_modified >= user.meta.last_modified
 
     def test_update_does_not_change_the_given_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any

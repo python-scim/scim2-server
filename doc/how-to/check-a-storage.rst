@@ -116,6 +116,11 @@ For a storage that cannot search several resource types at once, set
     SKIPPED [10] scim2_server/testing.py:216: The service does not support cursor pagination
     ======================= 96 passed, 12 skipped in 6.79s =========================
 
+For a storage that does not store the dates, set
+:attr:`~scim2_server.testing.ScimStorageContract.stores_created` or
+:attr:`~scim2_server.testing.ScimStorageContract.stores_last_modified` to :data:`False`. The
+suite then checks that the storage leaves these dates empty.
+
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
 and a sort with :class:`~scim2_models.InvalidPathException`. The suite skips the filters and the
 sorts the storage refuses, and checks the others:

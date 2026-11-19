@@ -68,7 +68,10 @@ Turn a row into a resource with the model that the provider gives for its resour
 :class:`~scim2_models.Meta` with ``resourceType``, ``created``, ``lastModified`` and
 ``version``. The version is the :mdn:`ETag` of the resource, so it must be a quoted entity tag,
 such as ``W/"3"`` (:rfc:`RFC 9110 §8.8.3 <9110#section-8.8.3>`). It must change on every write.
-The example counts the writes. Leave ``meta.location`` empty: the server builds it from its own URL.
+The example counts the writes. A storage without date columns leaves ``created`` and
+``lastModified`` empty. Do not copy ``created`` into ``lastModified``: per
+:rfc:`RFC 7643 §3.1 <7643#section-3.1>`, they are equal only while the resource has not changed.
+Leave ``meta.location`` empty: the server builds it from its own URL.
 In the same way, a reference to another resource, such as ``members.$ref``, can be relative to
 the SCIM root, such as ``Users/2819c223``: the server returns its URL.
 
@@ -181,7 +184,8 @@ Update a resource
 
 :meth:`~scim2_server.storage.ScimStorage.update` receives the whole new state of a resource, for
 a PUT request and for a PATCH request. The server has already applied the request. Keep
-``meta.created``, and change ``meta.lastModified`` and ``meta.version``.
+``meta.created``, and change ``meta.version``. Change ``meta.lastModified`` too, if the storage
+stores it.
 
 When ``expected_version`` is given, write the resource only if its stored version is still
 ``expected_version``, in the same query. Another client may change the resource between two

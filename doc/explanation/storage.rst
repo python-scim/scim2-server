@@ -41,7 +41,7 @@ layer that has the information:
        of each resource.
    * - ``created``, ``lastModified``
      - the storage
-     - Only the storage knows when it writes.
+     - Only the storage knows when it writes. A storage without date columns leaves them empty.
    * - ``version``
      - the storage
      - It is an entity tag, such as ``W/"3"``, built from a version column, a counter or a hash.

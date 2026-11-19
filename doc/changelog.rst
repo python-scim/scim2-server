@@ -1,6 +1,15 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- A storage may leave ``meta.created`` and ``meta.lastModified`` empty when it does not store
+  them. For such a storage, set :attr:`~scim2_server.testing.ScimStorageContract.stores_created`
+  or :attr:`~scim2_server.testing.ScimStorageContract.stores_last_modified` to :data:`False`.
+
 [0.8.6] - 2026-11-12
 --------------------
 
