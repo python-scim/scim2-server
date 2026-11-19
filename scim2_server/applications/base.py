@@ -66,7 +66,20 @@ class BaseApplication:
 
         It returns :data:`None` by default. Override it to pass the subject
         that :meth:`check_auth` authenticated to the service, for
-        :meth:`~scim2_server.service.ScimService.authorize` and ``/Me``.
+        :meth:`~scim2_server.service.ScimService.authorize` and ``/Me``. The
+        following application passes the identifier of the user of a bearer
+        token:
+
+        >>> from scim2_server.applications.wsgi import WSGIApplication
+        >>> TOKENS = {"secret": "2819c223"}
+        >>> class TokenApplication(WSGIApplication):
+        ...     def get_subject(self, request):
+        ...         header = request.header("Authorization") or ""
+        ...         _, _, token = header.partition(" ")
+        ...         return TOKENS.get(token)
+
+        :doc:`/how-to/authenticate-the-clients` uses the subject to check the
+        rights of the client.
         """
         return None
 
@@ -78,7 +91,20 @@ class BaseApplication:
         whose credentials are missing or invalid. Check the rights of the
         client in :meth:`~scim2_server.service.ScimService.authorize`, which
         sees each operation of a bulk request. It is not called for
-        ``/ServiceProviderConfig`` (:rfc:`RFC 7643 §5 <7643#section-5>`).
+        ``/ServiceProviderConfig`` (:rfc:`RFC 7643 §5 <7643#section-5>`). The
+        following application accepts the bearer tokens of a dictionary:
+
+        >>> from scim2_models import UnauthorizedException
+        >>> from scim2_server.applications.wsgi import WSGIApplication
+        >>> TOKENS = {"secret": "2819c223"}
+        >>> class TokenApplication(WSGIApplication):
+        ...     def check_auth(self, request):
+        ...         header = request.header("Authorization") or ""
+        ...         scheme, _, token = header.partition(" ")
+        ...         if scheme.lower() != "bearer" or token not in TOKENS:
+        ...             raise UnauthorizedException(detail="Missing or invalid token")
+
+        :meth:`get_subject` then passes the client to the service.
         """
 
     def needs_auth(self, request: ScimRequest) -> bool:

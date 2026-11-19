@@ -269,6 +269,19 @@ class ScimService:
         <scim2_server.requests.ScimRequest.subject>`. The exceptions it raises
         answer the request.
 
+        The following service serves the user whose identifier is the
+        subject:
+
+        >>> from scim2_models import UnauthorizedException
+        >>> class MeService(ScimService):
+        ...     def me_target(self, request):
+        ...         if request.subject is None:
+        ...             raise UnauthorizedException
+        ...         return self.get_resource_type("User"), request.subject
+
+        :doc:`/how-to/serve-the-me-endpoint` also handles the subjects
+        without a user.
+
         :raises ~scim2_models.NotImplementedException: By default, so that
             ``/Me`` answers 501.
         :raises ~scim2_models.UnauthorizedException: When the request has no
@@ -287,6 +300,19 @@ class ScimService:
         Override this method to let the clients register themselves
         (:rfc:`RFC 7644 §7.6 <7644#section-7.6>`). Linking the created resource to the subject is left to the
         application. The exceptions it raises answer the request.
+
+        The following service lets the authenticated clients create their
+        user:
+
+        >>> from scim2_models import UnauthorizedException
+        >>> class RegistrationService(ScimService):
+        ...     def me_creation_type(self, request):
+        ...         if request.subject is None:
+        ...             raise UnauthorizedException
+        ...         return self.get_resource_type("User")
+
+        :doc:`/how-to/serve-the-me-endpoint` also refuses the clients that
+        already have a user, and links the created user to the subject.
 
         :raises ~scim2_models.NotImplementedException: By default, so that a
             POST on ``/Me`` answers 501.
@@ -342,6 +368,20 @@ class ScimService:
         ``resource_type`` is one of the searched types. A
         :class:`~scim2_models.ForbiddenException` removes this type from the
         search. The search answers 403 when every type is removed.
+
+        The following service lets the clients read, and refuses the other
+        operations:
+
+        >>> from scim2_models import ForbiddenException
+        >>> from scim2_server.routing import Operation
+        >>> READS = {Operation.query, Operation.search, Operation.search_with_body}
+        >>> class ReadOnlyService(ScimService):
+        ...     def authorize(self, request, target, resource_type):
+        ...         if target.operation not in READS:
+        ...             raise ForbiddenException(detail="Read-only access")
+
+        :doc:`/how-to/authenticate-the-clients` checks the scopes of a token
+        instead.
 
         :raises ~scim2_models.ForbiddenException: When the client may not
             perform the operation, for a 403.
@@ -548,7 +588,19 @@ class ScimService:
     ) -> str:
         """Return the URL of a resource.
 
-        Override this method to serve the resources at other URLs.
+        Override this method to serve the resources at other URLs. The
+        following service publishes the resources under the URL of a gateway:
+
+        >>> class GatewayService(ScimService):
+        ...     def resource_location(self, base_url, resource_type, resource_id):
+        ...         return f"https://api.example{resource_type.endpoint}/{resource_id}"
+        >>> from scim2_server.utils import load_default_provider
+        >>> service = GatewayService(load_default_provider())
+        >>> service.resource_location("", service.get_resource_type("User"), "42")
+        'https://api.example/Users/42'
+
+        :doc:`/how-to/publish-the-resources-at-other-urls` shows the effect on
+        the responses.
         """
         assert resource_type.endpoint is not None
         return (
@@ -1322,6 +1374,15 @@ class ScimService:
         provider configuration, for the Bearer and Basic schemes. Override this
         method to announce other schemes, or to add parameters to the
         challenges, such as ``resource_metadata`` (:rfc:`RFC 9728 §5.1 <9728#section-5.1>`).
+        The following service replaces the challenges with a single Bearer
+        challenge that carries ``resource_metadata``:
+
+        >>> class ProtectedResourceService(ScimService):
+        ...     def www_authenticate(self, exception):
+        ...         url = "https://scim.example/.well-known/oauth-protected-resource"
+        ...         return f'Bearer resource_metadata="{url}"'
+
+        :doc:`/how-to/authenticate-the-clients` shows the resulting header.
         """
         schemes = self.config.authentication_schemes or []
         challenges = dict.fromkeys(

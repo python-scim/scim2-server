@@ -238,7 +238,20 @@ class InMemoryStorage(ScimStorage):
     def generate_id(self, resource_type: ResourceType, resource: Resource[Any]) -> str:
         """Return the identifier of a new resource.
 
-        Override this method to get predictable identifiers.
+        Override this method to get predictable identifiers. The following
+        storage numbers the resources from 1:
+
+        >>> from itertools import count
+        >>> class NumberedStorage(InMemoryStorage):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.ids = count(1)
+        ...
+        ...     def generate_id(self, resource_type, resource):
+        ...         return str(next(self.ids))
+        >>> storage = NumberedStorage()
+        >>> storage.generate_id(None, None), storage.generate_id(None, None)
+        ('1', '2')
         """
         return uuid.uuid4().hex
 

@@ -171,6 +171,16 @@ class TenantDispatcher:
 
         Override this method to read the tenant from somewhere else, such as
         a header or a sub-domain (:rfc:`RFC 7644 §6.1 <7644#section-6.1>`).
+        The following dispatcher reads the tenant in the sub-domain, such as
+        ``acme`` in ``acme.scim.example``:
+
+        >>> class SubdomainDispatcher(TenantDispatcher):
+        ...     def select_tenant(self, environ):
+        ...         host = environ.get("HTTP_HOST", "").partition(":")[0].lower()
+        ...         tenant, _, domain = host.partition(".")
+        ...         if domain != "scim.example" or not self.is_valid_tenant(tenant):
+        ...             return None
+        ...         return tenant
         """
         path_info: str = environ.get("PATH_INFO", "")
         _, _, path = path_info.partition("/")

@@ -282,7 +282,14 @@ class ScimStorage(ABC):
         It does nothing by default. A SQL storage can open a savepoint here,
         so that a failed operation does not prevent the next ones of a bulk
         request (:rfc:`RFC 7644 §3.7 <7644#section-3.7>`). Committing the
-        request is left to the application.
+        request is left to the application. The following storage opens a
+        SQLAlchemy savepoint:
+
+        >>> class SQLStorage(ScimStorage):
+        ...     def operation(self):
+        ...         return self.session.begin_nested()
+
+        :doc:`/how-to/write-a-storage` describes the other methods.
         """
         return nullcontext()
 
