@@ -10,7 +10,7 @@ RUN uv sync --locked --no-dev --extra precis --extra cursor --extra oauth --no-i
 COPY scim2_server ./scim2_server
 RUN uv sync --locked --no-dev --extra precis --extra cursor --extra oauth --no-editable
 
-FROM python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
+FROM python:3.14-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
