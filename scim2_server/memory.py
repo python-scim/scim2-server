@@ -39,19 +39,28 @@ def utcnow() -> datetime.datetime:
 
 
 def _page(
-    search_request: SearchRequest[Any], position: Any, resources: list[Resource[Any]]
+    search_request: SearchRequest[Any],
+    position: Any,
+    resources: list[Resource[Any]],
+    names: list[str | None],
 ) -> SearchPage:
-    """Sort every matching resource by its sort value then its identifier, and return the page a search asks for.
+    """Sort every matching resource by its sort value, its resource type then its identifier, and return the page a search asks for.
 
-    A cursor position holds the sort value and the identifier of the resource
-    the page starts after, or ends before, so the pages stay stable.
+    A cursor position holds the sort value, the resource type and the
+    identifier of the resource the page starts after, or ends before, so the
+    pages stay stable. The resource type is left out of the positions of a
+    search on a single resource type.
     """
+    types = {name: index for index, name in enumerate(names)}
     descending = (
         search_request.sort_by is not None
         and search_request.sort_order == SearchRequest.SortOrder.descending
     )
     pairs = sorted(
-        ((_sort_key(search_request, resource), resource) for resource in resources),
+        (
+            (_sort_key(search_request, types, resource), resource)
+            for resource in resources
+        ),
         key=lambda pair: pair[0],
         reverse=descending,
     )
@@ -64,25 +73,34 @@ def _page(
     if search_request.count == 0:
         return SearchPage(len(found), [])
 
-    anchor = Position.load(position, has_sort=search_request.sort_by is not None)
+    type_count = len(types) if len(types) > 1 else None
+    anchor = Position.load(
+        position, has_sort=search_request.sort_by is not None, type_count=type_count
+    )
     start, stop = _bounds(
         [key for key, _ in pairs], anchor, search_request.count, descending
     )
     page = SearchPage(len(found), found[start:stop])
     if page.resources and stop < len(found):
-        page.next = _position(True, pairs[stop - 1][0])
+        page.next = _position(True, pairs[stop - 1][0], type_count)
     if page.resources and start > 0:
-        page.previous = _position(False, pairs[start][0])
+        page.previous = _position(False, pairs[start][0], type_count)
     return page
 
 
-SortKey = tuple[bool, Any, str]
+SortKey = tuple[bool, Any, int, str]
 
 
-def _sort_key(search_request: SearchRequest[Any], resource: Resource[Any]) -> SortKey:
-    """Return the key that orders a resource: its sort value, missing values last, then its identifier."""
+def _sort_key(
+    search_request: SearchRequest[Any],
+    types: dict[str | None, int],
+    resource: Resource[Any],
+) -> SortKey:
+    """Return the key that orders a resource: its sort value, missing values last, then its resource type and its identifier."""
     value = search_request.sort_value(resource)
-    return value is None, value if value is not None else "", cast(str, resource.id)
+    type_index = types[cast(Meta, resource.meta).resource_type]
+    missing = value is None
+    return missing, "" if missing else value, type_index, cast(str, resource.id)
 
 
 def _bounds(
@@ -93,7 +111,7 @@ def _bounds(
         return 0, len(keys) if count is None else min(count, len(keys))
 
     missing = anchor.key is None
-    bound = (missing, "" if missing else anchor.key, anchor.id)
+    bound = (missing, "" if missing else anchor.key, anchor.type_index or 0, anchor.id)
 
     def before(key: SortKey) -> bool:
         return key > bound if descending else key < bound
@@ -108,10 +126,11 @@ def _bounds(
     return start, stop
 
 
-def _position(forward: bool, key: SortKey) -> dict[str, Any]:
+def _position(forward: bool, key: SortKey, type_count: int | None) -> dict[str, Any]:
     """Return the position of the page that starts after, or ends before, a sort key."""
-    missing, value, identifier = key
-    return Position(forward, None if missing else value, identifier).dump()
+    missing, value, type_index, identifier = key
+    by_type = None if type_count is None else type_index
+    return Position(forward, None if missing else value, identifier, by_type).dump()
 
 
 Key = tuple[str | None, str]
@@ -268,7 +287,7 @@ class InMemoryStorage(ScimStorage):
             found = [
                 r for r in candidates if scim_filter is None or scim_filter.match(r)
             ]
-            page = _page(search_request, position, found)
+            page = _page(search_request, position, found, names)
             page.resources = [r.model_copy(deep=True) for r in page.resources]
             return page
 

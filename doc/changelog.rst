@@ -17,6 +17,14 @@ Changed
 ^^^^^^^
 - :class:`~scim2_server.memory.InMemoryStorage` refuses a position with unexpected keys, or with
   a sort value on a search without sort, as an invalid cursor.
+- At the root, :class:`~scim2_server.memory.InMemoryStorage` orders the resources with the same
+  sort value by resource type, then by identifier. Its cursors at the root, issued before this
+  version, are refused as invalid.
+
+Fixed
+^^^^^
+- A cursor search at the root of :class:`~scim2_server.memory.InMemoryStorage` no longer skips
+  resources when resources of different types share an identifier.
 
 [0.8.7] - 2026-11-20
 --------------------

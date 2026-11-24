@@ -10,6 +10,7 @@ from scim2_models import CaseExact
 from scim2_models import ComplexAttribute
 from scim2_models import Extension
 from scim2_models import Filter
+from scim2_models import InvalidCursorException
 from scim2_models import InvalidFilterException
 from scim2_models import InvalidPathException
 from scim2_models import NotFoundException
@@ -85,6 +86,71 @@ class TestStorageWithoutModificationDate(TestStorageWithoutDates):
 
     stores_created = True
     stores_last_modified = False
+
+
+class StorageNumberedByType(InMemoryStorage):
+    """Number the resources of each resource type from 1."""
+
+    def __init__(self):
+        super().__init__()
+        self.counts = {}
+
+    def generate_id(self, resource_type, resource):
+        self.counts[resource_type.name] = self.counts.get(resource_type.name, 0) + 1
+        return str(self.counts[resource_type.name])
+
+
+class TestStorageNumberedByType(ScimStorageContract):
+    """The contract holds when resources of different types share an identifier."""
+
+    @pytest.fixture
+    def storage(self):
+        return StorageNumberedByType()
+
+
+@pytest.fixture
+def numbered(scim_provider):
+    """Return a storage holding two users and a group, numbered from 1 by resource type, and the types to search at the root."""
+    types = {rt.id: rt for rt in scim_provider.resource_types}
+    user_type, group_type = types["User"], types["Group"]
+    storage = StorageNumberedByType()
+    User = scim_provider.model_for(user_type)
+    Group = scim_provider.model_for(group_type)
+    storage.create(user_type, User(user_name="alice"))
+    storage.create(user_type, User(user_name="bob"))
+    storage.create(group_type, Group(display_name="admins"))
+    return storage, [group_type, user_type]
+
+
+@pytest.mark.parametrize("cursor", [None, ""], ids=["by index", "by cursor"])
+def test_a_root_search_orders_tied_resources_by_resource_type(numbered, cursor):
+    """At the root, resources with the same sort value come by resource type, in the order of the search, then by identifier."""
+    storage, resource_types = numbered
+
+    page = storage.search(resource_types, SearchRequest(cursor=cursor))
+
+    assert [(r.meta.resource_type, r.id) for r in page.resources] == [
+        ("Group", "1"),
+        ("User", "1"),
+        ("User", "2"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "position",
+    [
+        {"d": "next", "k": None, "i": "1"},
+        {"d": "next", "k": None, "t": 2, "i": "1"},
+    ],
+)
+def test_a_root_position_needs_one_of_the_searched_resource_types(numbered, position):
+    """At the root, a position without the index of a searched resource type raises invalidCursor."""
+    storage, resource_types = numbered
+
+    with pytest.raises(InvalidCursorException):
+        storage.search(
+            resource_types, SearchRequest(cursor="", count=1), position=position
+        )
 
 
 def test_async_storage_serves_the_resources_of_a_given_storage(
