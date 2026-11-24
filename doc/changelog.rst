@@ -1,6 +1,23 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- :mod:`scim2_server.keyset` helps a storage page with cursors by keyset. It reads and writes the
+  positions, keeps dates, decimal numbers and UUIDs in their own type, and builds the pages
+  around a position. :class:`~scim2_server.memory.InMemoryStorage` uses it, and accepts these
+  sort values too.
+- :class:`~scim2_server.testing.ScimStorageContract` checks a cursor on a search sorted by date,
+  and following the previous cursors at the root and in descending order.
+
+Changed
+^^^^^^^
+- :class:`~scim2_server.memory.InMemoryStorage` refuses a position with unexpected keys, or with
+  a sort value on a search without sort, as an invalid cursor.
+
 [0.8.7] - 2026-11-20
 --------------------
 

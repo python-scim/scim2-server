@@ -331,7 +331,7 @@ def test_a_cursor_refuses_a_sort_value_it_cannot_hold(
     value = object()
     monkeypatch.setattr(SearchRequest, "sort_value", lambda self, resource: value)
 
-    with pytest.raises(TypeError, match="cannot hold"):
+    with pytest.raises(TypeError, match="Cannot page on a sort value"):
         storage.search(
             [user_type], SearchRequest(cursor="", count=1, sort_by="userName")
         )

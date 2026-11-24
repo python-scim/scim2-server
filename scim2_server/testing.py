@@ -1028,6 +1028,109 @@ class ScimStorageContract:
 
         assert sorted(self.ids(pages)) == sorted([users[0].id, users[1].id, group.id])
 
+    def test_cursor_pages_back_at_the_root(
+        self,
+        storage: Any,
+        user_type: ResourceType,
+        group_type: ResourceType,
+        user_model: Any,
+        group_model: Any,
+    ) -> None:
+        """Following the previous cursors at the root returns the same pages, back to the first."""
+        self.require(storage.supports_cursors, "cursor pagination")
+        self.require(self.supports_root_search, "searching at the root")
+        users = self.create_users(storage, user_type, user_model, "alice", "bob")
+        self.create_group(storage, group_type, group_model, users[0])
+        resource_types = [user_type, group_type]
+        search_request = self.search_request(
+            [user_model, group_model], cursor="", count=1
+        )
+        forward = self.walk(storage, resource_types, search_request)
+
+        backward = self.walk_back(storage, resource_types, search_request, forward[-1])
+
+        assert [[r.id for r in page.resources] for page in reversed(backward)] == [
+            [r.id for r in page.resources] for page in forward[:-1]
+        ]
+        assert backward[-1].previous is None
+
+    def test_cursor_pages_back_in_descending_order_with_missing_values(
+        self,
+        storage: Any,
+        provider: ScimProvider,
+        user_type: ResourceType,
+        user_model: Any,
+    ) -> None:
+        """Following the previous cursors of a descending sort returns the same pages, with the resources without value first."""
+        self.require(storage.supports_cursors, "cursor pagination")
+        self.require(self.announces(provider, "sort"), "sorting")
+        self.require("nick_name" in user_model.model_fields, "nickName")
+        for user_name, nick_name in [
+            ("alice", "a"),
+            ("bob", None),
+            ("carol", "c"),
+            ("dave", "b"),
+            ("erin", None),
+        ]:
+            storage.create(
+                user_type, user_model(user_name=user_name, nick_name=nick_name)
+            )
+
+        search_request = self.search_request(
+            [user_model],
+            cursor="",
+            count=2,
+            sort_by="nickName",
+            sort_order="descending",
+        )
+        forward = self.walk(storage, [user_type], search_request)
+        backward = self.walk_back(storage, [user_type], search_request, forward[-1])
+
+        names = [r.user_name for page in forward for r in page.resources]
+        assert sorted(names[:2]) == ["bob", "erin"]
+        assert names[2:] == ["carol", "dave", "alice"]
+        assert [[r.id for r in page.resources] for page in reversed(backward)] == [
+            [r.id for r in page.resources] for page in forward[:-1]
+        ]
+        assert backward[-1].previous is None
+
+    def test_cursor_pages_by_date(
+        self,
+        storage: Any,
+        provider: ScimProvider,
+        user_type: ResourceType,
+        user_model: Any,
+    ) -> None:
+        """A cursor pages a search sorted by date, in both directions.
+
+        Resources modified at the same time may come in any order.
+        """
+        self.require(storage.supports_cursors, "cursor pagination")
+        self.require(self.announces(provider, "sort"), "sorting")
+        self.require(self.stores_last_modified, "meta.lastModified")
+        created = self.create_users(
+            storage, user_type, user_model, "alice", "bob", "carol", "dave", "erin"
+        )
+        search_request = self.search_request(
+            [user_model], cursor="", count=2, sort_by="meta.lastModified"
+        )
+        first = self.search_or_skip(storage, [user_type], search_request)
+        forward = [first]
+        while forward[-1].next is not None:
+            forward.append(
+                self.search(storage, [user_type], search_request, forward[-1].next)
+            )
+
+        backward = self.walk_back(storage, [user_type], search_request, forward[-1])
+
+        dates = [r.meta.last_modified for page in forward for r in page.resources]
+        assert sorted(self.ids(forward)) == sorted(user.id for user in created)
+        assert dates == sorted(dates)
+        assert [[r.id for r in page.resources] for page in reversed(backward)] == [
+            [r.id for r in page.resources] for page in forward[:-1]
+        ]
+        assert backward[-1].previous is None
+
     def test_operation(
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:

@@ -34,12 +34,20 @@ identifier. Its server announces neither the filter nor the sort:
          :language: python
          :pyobject: AsyncCursorSQLiteStorage
 
-- The position of the next page is ``{"after": ...}``, with the identifier of the last resource
-  of the page. The position of the previous page is ``{"before": ...}``, with the identifier of
-  the first one. A position is a value that JSON can hold.
+The storage uses the helpers of :mod:`scim2_server.keyset`:
+
+- :meth:`Position.load <scim2_server.keyset.Position.load>` reads the position. It holds the
+  identifier of the row the page starts after, or ends before.
 - The next page selects the rows after this identifier. The previous page selects the rows
-  before it, in the reverse order, and reverses them afterwards.
-- The storage reads ``count + 1`` rows to know whether another page follows.
+  before it, in the reverse order.
+- The storage reads ``count + 1`` rows. :func:`~scim2_server.keyset.page_rows` puts them back in
+  order, and tells whether another page follows.
+- :func:`~scim2_server.keyset.keyset_page` returns the page, with the positions of the pages
+  before and after it. It needs the first and the last rows of the page, as
+  :class:`~scim2_server.keyset.Bound`.
+
+A position is a value that JSON can hold. A storage may write its own positions instead of
+these ones.
 
 Support the sort
 ----------------
@@ -49,6 +57,17 @@ no two rows are equal. Its positions also hold the sort value of the resource, a
 :meth:`~scim2_models.SearchRequest.sort_value` gives it. A row without sort value comes last
 when ascending, and first when descending, so the storage writes the condition on the sort value
 by hand, rather than with a row comparison, which does not handle ``NULL``.
+
+With the helpers, the storage passes ``has_sort=True`` to
+:meth:`Position.load <scim2_server.keyset.Position.load>`, and the sort value of each row as the
+``key`` of its :class:`~scim2_server.keyset.Bound`. Dates, decimal numbers and UUIDs are kept in
+their own type.
+
+At the root, two resources of different types may share an identifier. A storage can then order
+the rows by resource type, between the sort value and the identifier. It passes the number of
+resource types as ``type_count`` to :meth:`Position.load <scim2_server.keyset.Position.load>`,
+and the index of the resource type of each row as ``type_index``. The storage of the example
+does not need it: its identifiers are UUIDs, so they are unique across the resource types.
 
 A backend that can only page with offsets does not set
 :attr:`~scim2_server.storage.ScimStorage.supports_cursors`, and its server pages by index only.

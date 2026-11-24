@@ -18,3 +18,22 @@ resources in memory.
 
 .. autoclass:: scim2_server.memory.AsyncInMemoryStorage
    :members: resources
+
+Keyset pagination
+-----------------
+
+.. automodule:: scim2_server.keyset
+
+.. autofunction:: scim2_server.keyset.encode_sort_value
+
+.. autofunction:: scim2_server.keyset.decode_sort_value
+
+.. autoclass:: scim2_server.keyset.Position
+   :members:
+
+.. autoclass:: scim2_server.keyset.Bound
+   :members:
+
+.. autofunction:: scim2_server.keyset.page_rows
+
+.. autofunction:: scim2_server.keyset.keyset_page

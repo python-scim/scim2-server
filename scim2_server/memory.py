@@ -10,7 +10,6 @@ from typing import Union
 from typing import cast
 
 from scim2_models import AttributeBinding
-from scim2_models import InvalidCursorException
 from scim2_models import Meta
 from scim2_models import NotFoundException
 from scim2_models import Path
@@ -25,6 +24,7 @@ from scim2_models import UniquenessException
 from scim2_models.path import CompareOperator
 from scim2_models.path import Comparison
 
+from scim2_server.keyset import Position
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
@@ -64,14 +64,15 @@ def _page(
     if search_request.count == 0:
         return SearchPage(len(found), [])
 
+    anchor = Position.load(position, has_sort=search_request.sort_by is not None)
     start, stop = _bounds(
-        [key for key, _ in pairs], position, search_request.count, descending
+        [key for key, _ in pairs], anchor, search_request.count, descending
     )
     page = SearchPage(len(found), found[start:stop])
     if page.resources and stop < len(found):
-        page.next = _position("next", pairs[stop - 1][0])
+        page.next = _position(True, pairs[stop - 1][0])
     if page.resources and start > 0:
-        page.previous = _position("previous", pairs[start][0])
+        page.previous = _position(False, pairs[start][0])
     return page
 
 
@@ -85,19 +86,20 @@ def _sort_key(search_request: SearchRequest[Any], resource: Resource[Any]) -> So
 
 
 def _bounds(
-    keys: list[SortKey], position: Any, count: int | None, descending: bool
+    keys: list[SortKey], anchor: Position | None, count: int | None, descending: bool
 ) -> tuple[int, int]:
     """Return the slice of the sorted keys that a cursor page covers."""
-    if position is None:
+    if anchor is None:
         return 0, len(keys) if count is None else min(count, len(keys))
 
-    direction, anchor = _read_position(position)
+    missing = anchor.key is None
+    bound = (missing, "" if missing else anchor.key, anchor.id)
 
     def before(key: SortKey) -> bool:
-        return key > anchor if descending else key < anchor
+        return key > bound if descending else key < bound
 
-    if direction == "next":
-        start = sum(1 for key in keys if before(key) or key == anchor)
+    if anchor.forward:
+        start = sum(1 for key in keys if before(key) or key == bound)
         stop = len(keys) if count is None else min(start + count, len(keys))
         return start, stop
 
@@ -106,42 +108,10 @@ def _bounds(
     return start, stop
 
 
-def _position(direction: str, key: SortKey) -> dict[str, Any]:
+def _position(forward: bool, key: SortKey) -> dict[str, Any]:
     """Return the position of the page that starts after, or ends before, a sort key."""
     missing, value, identifier = key
-    return {"d": direction, "k": None if missing else _encode(value), "i": identifier}
-
-
-def _read_position(position: Any) -> tuple[str, SortKey]:
-    """Return the direction and the sort key of a position that _page gave."""
-    try:
-        direction, value, identifier = position["d"], position["k"], position["i"]
-    except (TypeError, KeyError):
-        raise InvalidCursorException from None
-    if direction not in ("next", "previous") or not isinstance(identifier, str):
-        raise InvalidCursorException
-    if value is None:
-        return direction, (True, "", identifier)
-    return direction, (False, _decode(value), identifier)
-
-
-def _encode(value: Any) -> Any:
-    """Return a sort value in a form JSON can hold."""
-    if isinstance(value, datetime.datetime):
-        return {"datetime": value.isoformat()}
-    if isinstance(value, str | bool | int | float):
-        return value
-    raise TypeError(f"A cursor cannot hold a sort value of type {type(value).__name__}")
-
-
-def _decode(value: Any) -> Any:
-    """Return the sort value that _encode gave."""
-    if not isinstance(value, dict):
-        return value
-    try:
-        return datetime.datetime.fromisoformat(value["datetime"])
-    except (KeyError, TypeError, ValueError):
-        raise InvalidCursorException from None
+    return Position(forward, None if missing else value, identifier).dump()
 
 
 Key = tuple[str | None, str]

@@ -1,4 +1,8 @@
 from doc._examples.sqlite_storage import SQLiteStorage
+from scim2_server.keyset import Bound
+from scim2_server.keyset import Position
+from scim2_server.keyset import keyset_page
+from scim2_server.keyset import page_rows
 from scim2_server.storage import SearchPage
 
 
@@ -19,26 +23,21 @@ class CursorSQLiteStorage(SQLiteStorage):
         return SearchPage(total, self._to_resources(types, rows))
 
     def _search_cursor(self, types, total, search_request, position):
+        anchor = Position.load(position, has_sort=False)
         count = search_request.count
         limit = -1 if count is None else count + 1
-        if position is None or "after" in position:
-            after = "" if position is None else position["after"]
+        if anchor is None or anchor.forward:
             clause = "AND id > ? ORDER BY id LIMIT ?"
-            rows = self._select(types, "*", clause, [after, limit])
-            resources = self._to_resources(types, rows[:count])
-            more_after, more_before = len(rows) > len(resources), position is not None
         else:
             clause = "AND id < ? ORDER BY id DESC LIMIT ?"
-            rows = self._select(types, "*", clause, [position["before"], limit])
-            resources = self._to_resources(types, rows[:count][::-1])
-            more_after, more_before = True, len(rows) > len(resources)
 
-        result = SearchPage(total, resources)
-        if resources and more_after:
-            result.next = {"after": resources[-1].id}
-        if resources and more_before:
-            result.previous = {"before": resources[0].id}
-        return result
+        identifier = "" if anchor is None else anchor.id
+        rows = self._select(types, "*", clause, [identifier, limit])
+        rows, more = page_rows(rows, search_request, anchor)
+        resources = self._to_resources(types, rows)
+        first = Bound(None, rows[0]["id"]) if rows else None
+        last = Bound(None, rows[-1]["id"]) if rows else None
+        return keyset_page(total, resources, first, last, more, anchor)
 
     def _select(self, types, columns, clause="", parameters=()):
         among = ", ".join("?" * len(types))
