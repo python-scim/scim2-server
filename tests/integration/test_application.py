@@ -1,13 +1,19 @@
 import datetime
+from typing import Annotated
 
 import httpx2
 import pytest
 import time_machine
+from scim2_models import URN
 from scim2_models import Bulk
 from scim2_models import ChangePassword
 from scim2_models import ETag
+from scim2_models import Extension
 from scim2_models import Filter
+from scim2_models import Mutability
 from scim2_models import Patch
+from scim2_models import ResourceType
+from scim2_models import Returned
 from scim2_models import ScimPolicy
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
@@ -519,6 +525,54 @@ class TestApplication:
         )
         assert r.status_code == 200
         assert app.storage.get(user_type, first_fake_user).password is None
+
+    def test_resource_patch_removes_the_password(
+        self, app, user_type, wsgi, first_fake_user
+    ):
+        """RFC 7644 §3.5.2.2 lets a client remove a password it cannot read."""
+        assert app.storage.get(user_type, first_fake_user).password is not None
+
+        r = wsgi.patch(
+            f"/v2/Users/{first_fake_user}",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [{"op": "remove", "path": "password"}],
+            },
+        )
+        assert r.status_code == 204
+        assert app.storage.get(user_type, first_fake_user).password is None
+
+    def test_resource_put_keeps_the_hidden_values_of_an_omitted_extension(
+        self, storage
+    ):
+        """A client never sees an extension holding only hidden values, so omitting it does not clear them."""
+
+        class Secrets(Extension):
+            __schema__ = URN("urn:example:2.0:Secrets")
+            pin: Annotated[str | None, Mutability.write_only, Returned.never] = None
+
+        user_type = ResourceType.from_resource(User[Secrets])
+        provider = ScimProvider(models=[User, Secrets], resource_types=[user_type])
+        transport = httpx2.WSGITransport(app=WSGIApplication(storage, provider))
+        with httpx2.Client(
+            transport=transport, base_url="https://scim.example.com"
+        ) as client:
+            created = client.post(
+                "/v2/Users",
+                json={
+                    "userName": "bjensen",
+                    "urn:example:2.0:Secrets": {"pin": "1234"},
+                },
+            ).json()
+            assert "urn:example:2.0:Secrets" not in created
+
+            r = client.put(
+                f"/v2/Users/{created['id']}",
+                json={"userName": "bjensen", "displayName": "Barbara"},
+            )
+
+        assert r.status_code == 200
+        assert storage.get(user_type, created["id"])[Secrets].pin == "1234"
 
     def test_resource_put_refuses_to_change_an_immutable_attribute(self, wsgi):
         """RFC 7644 §3.5.1: an immutable value already set MUST match the input value."""

@@ -180,6 +180,16 @@ class ScimStorageContract:
     empty.
     """
 
+    stores_password: bool = True
+    """Whether the storage stores the ``password`` of the users.
+
+    Set it to :data:`False` only for a storage that does not keep the
+    password at all. The tests of the write-only and never returned
+    attributes are then skipped. A storage that keeps a hash of the password
+    stores it: its :meth:`~scim2_server.storage.ScimStorage.get` returns the
+    hash.
+    """
+
     @pytest.fixture
     def provider(self) -> ScimProvider:
         """Return the description of the service the storage serves."""
@@ -446,6 +456,62 @@ class ScimStorageContract:
         storage.update(user_type, user).user_name = "changed"
 
         assert storage.get(user_type, user.id).user_name == "bjensen"
+
+    def create_user_with_password(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> Any:
+        """Create a user with a password, and read it back, as the server does before a PUT or a PATCH."""
+        self.require(self.stores_password, "the password")
+        user = storage.create(
+            user_type, user_model(user_name="bjensen", password="secret")
+        )
+        return storage.get(user_type, user.id)
+
+    def test_get_returns_the_write_only_values(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """A whole resource holds its password, in the form the storage keeps it."""
+        user = self.create_user_with_password(storage, user_type, user_model)
+
+        assert user.password is not None
+
+    def test_update_keeps_the_write_only_values_read_back(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """The password read back and given to update unchanged stays as it is.
+
+        It is what a PUT without password gives, per :rfc:`RFC 7644 §3.5.1
+        <7644#section-3.5.1>`.
+        """
+        user = self.create_user_with_password(storage, user_type, user_model)
+        user.display_name = "Barbara"
+
+        storage.update(user_type, user)
+
+        assert storage.get(user_type, user.id).password == user.password
+
+    def test_update_clears_a_write_only_value(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """A PATCH removing the password clears it."""
+        user = self.create_user_with_password(storage, user_type, user_model)
+        user.password = None
+
+        storage.update(user_type, user)
+
+        assert storage.get(user_type, user.id).password is None
+
+    def test_update_changes_a_write_only_value(
+        self, storage: Any, user_type: ResourceType, user_model: Any
+    ) -> None:
+        """A new password replaces the stored one."""
+        user = self.create_user_with_password(storage, user_type, user_model)
+        former = user.password
+        user.password = "other"
+
+        storage.update(user_type, user)
+
+        assert storage.get(user_type, user.id).password not in (None, former)
 
     def test_update_an_unknown_resource(
         self, storage: Any, user_type: ResourceType, user_model: Any

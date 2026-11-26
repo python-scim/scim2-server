@@ -173,6 +173,14 @@ class ScimStorage(ABC):
         Without ``response_parameters``, the storage returns the whole
         resource.
 
+        The whole resource holds the write-only and never returned
+        attributes, such as ``password``, in the form the storage keeps them,
+        a hash for instance. The server never returns them to the client
+        (:rfc:`RFC 7643 §2.2 <7643#section-2.2>`). It needs them to keep a
+        value that a PUT leaves out (:rfc:`RFC 7644 §3.5.1
+        <7644#section-3.5.1>`), and to clear one that a PATCH removes
+        (:rfc:`RFC 7644 §3.5.2.2 <7644#section-3.5.2.2>`).
+
         A ``get`` method without ``response_parameters`` is deprecated, and
         raises a :class:`DeprecationWarning`. The server then does not pass
         the parameters. scim2-server 0.9 will require it.
@@ -251,6 +259,12 @@ class ScimStorage(ABC):
         The server calls it for PUT and PATCH requests. It applies the
         request to the stored resource first, so ``resource`` is the whole new
         state of the resource.
+
+        A write-only or never returned value that :meth:`get` returned comes
+        back unchanged
+        when the request does not change it. The storage keeps it as it is,
+        and does not hash it again. It clears the value when it comes back as
+        :data:`None`.
 
         :param expected_version: The version the stored resource must still
             have, when given.

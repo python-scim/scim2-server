@@ -88,6 +88,26 @@ class TestStorageWithoutModificationDate(TestStorageWithoutDates):
     stores_last_modified = False
 
 
+class StorageWithoutPassword(InMemoryStorage):
+    """Drop the password of the users."""
+
+    def _store(self, resource, values):
+        if hasattr(resource, "password"):
+            resource.password = None
+
+        super()._store(resource, values)
+
+
+class TestStorageWithoutPassword(ScimStorageContract):
+    """The contract skips the password checks for a storage without password."""
+
+    stores_password = False
+
+    @pytest.fixture
+    def storage(self):
+        return StorageWithoutPassword()
+
+
 class StorageNumberedByType(InMemoryStorage):
     """Number the resources of each resource type from 1."""
 

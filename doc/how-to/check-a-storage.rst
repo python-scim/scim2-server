@@ -119,7 +119,9 @@ For a storage that cannot search several resource types at once, set
 For a storage that does not store the dates, set
 :attr:`~scim2_server.testing.ScimStorageContract.stores_created` or
 :attr:`~scim2_server.testing.ScimStorageContract.stores_last_modified` to :data:`False`. The
-suite then checks that the storage leaves these dates empty.
+suite then checks that the storage leaves these dates empty. For a storage that does not store
+the password of the users, set :attr:`~scim2_server.testing.ScimStorageContract.stores_password`
+to :data:`False`.
 
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
 and a sort with :class:`~scim2_models.InvalidPathException`. The suite skips the filters and the

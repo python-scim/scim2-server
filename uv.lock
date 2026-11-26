@@ -1470,15 +1470,15 @@ wheels = [
 
 [[package]]
 name = "scim2-models"
-version = "0.12.4"
+version = "0.12.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lark" },
     { name = "pydantic", extra = ["email"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/af/bb485af5b4c024cdfe5be833daf57aee438e54fa5acc9a9ad1a3f210ccdc/scim2_models-0.12.4.tar.gz", hash = "sha256:d3cfaafbe49d6daa61b63afe0f0536774e7543218eaa222164ccb95ecb8871aa", size = 113701, upload-time = "2026-10-29T14:25:21.251Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/8a/416ef98d1a45fae31ac668821aba7a7dbc48b1060a77bc788f133589c06e/scim2_models-0.12.7.tar.gz", hash = "sha256:cb6b0ef0bbb8e9310e9cd03643686f998cdcafe9d3545bac4da3d3a97c636551", size = 114743, upload-time = "2026-11-26T10:39:21.002Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/31/2f7a5618a84edc60508aaa92b4228f83424c9e993e90e224cae5a252baa3/scim2_models-0.12.4-py3-none-any.whl", hash = "sha256:d219558358557a674e0a5b85f6d11cb2cd8cdf3182c4942df0956891be052e8e", size = 132218, upload-time = "2026-10-29T14:25:19.869Z" },
+    { url = "https://files.pythonhosted.org/packages/73/94/54acb94d55752133b1eb2622be0ef5c98a26716bef039baa416594e92960/scim2_models-0.12.7-py3-none-any.whl", hash = "sha256:da71f5f651940fb486149336bedc85d7f819c922b2b8c4ca82269c85dce91f2e", size = 133284, upload-time = "2026-11-26T10:39:19.632Z" },
 ]
 
 [[package]]
@@ -1536,7 +1536,7 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'cursor'", specifier = ">=50.0.1" },
     { name = "precis-i18n", marker = "extra == 'precis'", specifier = ">=1.1.2" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
-    { name = "scim2-models", specifier = ">=0.12.2" },
+    { name = "scim2-models", specifier = ">=0.12.7" },
 ]
 provides-extras = ["testing", "precis", "cursor", "oauth"]
 

@@ -1,6 +1,24 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- :class:`~scim2_server.testing.ScimStorageContract` checks that a storage returns the stored
+  password, keeps it when it comes back unchanged, and clears it. Set
+  :attr:`~scim2_server.testing.ScimStorageContract.stores_password` to :data:`False` for a
+  storage that does not keep it.
+
+Changed
+^^^^^^^
+- A storage must return the write-only and never returned attributes, such as ``password``,
+  from :meth:`~scim2_server.storage.ScimStorage.get`, in the form it keeps them, a hash for
+  instance. Its :meth:`~scim2_server.storage.ScimStorage.update` keeps such a value when it
+  comes back unchanged, and clears it when it comes back as ``None``. Without them, a PATCH that
+  removes the password changes nothing. Update your storage if its ``get`` leaves them out.
+
 [0.8.8] - 2026-11-24
 --------------------
 

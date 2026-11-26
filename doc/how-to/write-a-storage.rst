@@ -124,6 +124,13 @@ loading what the response leaves out, such as the members of a group kept in ano
 Without ``response_parameters``, return the whole resource. The server needs it for a PUT, a
 PATCH or a DELETE request.
 
+The whole resource includes the write-only and never returned attributes, such as ``password``.
+Return them in the form the storage keeps them, a hash for instance. The server never returns
+them to the client (:rfc:`RFC 7643 §2.2 <7643#section-2.2>`). It needs them to keep a value that a
+PUT leaves out
+(:rfc:`RFC 7644 §3.5.1 <7644#section-3.5.1>`), and to clear one that a PATCH removes
+(:rfc:`RFC 7644 §3.5.2.2 <7644#section-3.5.2.2>`).
+
 Create a resource
 -----------------
 
@@ -185,7 +192,9 @@ Update a resource
 :meth:`~scim2_server.storage.ScimStorage.update` receives the whole new state of a resource, for
 a PUT request and for a PATCH request. The server has already applied the request. Keep
 ``meta.created``, and change ``meta.version``. Change ``meta.lastModified`` too, if the storage
-stores it.
+stores it. A write-only or never returned value that ``get`` returned comes back unchanged
+when the request does not change it: keep it as it is, and do not hash it again. Clear it when
+it comes back as ``None``.
 
 When ``expected_version`` is given, write the resource only if its stored version is still
 ``expected_version``, in the same query. Another client may change the resource between two
