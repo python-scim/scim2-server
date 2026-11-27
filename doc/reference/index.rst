@@ -35,6 +35,7 @@ Storage
    :maxdepth: 1
 
    storages
+   mapping
    testing
 
 Test server
