@@ -186,6 +186,11 @@ exception:
          :pyobject: AsyncSQLiteStorage.writing
          :dedent: 4
 
+A sub-attribute can be unique too, such as the ``value`` of an email in a model of yours. Each
+value of a multi-valued attribute then counts on its own, and two equal values in the same
+resource do not clash. :func:`~scim2_server.storage.unique_values` lists the unique values of a
+resource, by attribute.
+
 Update a resource
 -----------------
 

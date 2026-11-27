@@ -365,6 +365,15 @@ class ResourceMapping:
                     self._collections[head] = collections
             else:
                 column = yield from self._build_column(path, binding, value, None)
+                if column is not None and column.concealed and _unique(binding):
+                    yield MappingProblem(
+                        "error",
+                        "hidden-unique",
+                        f"{path!r} is hidden from clients, so it cannot be unique: "
+                        "refusing a value would tell that another resource holds it",
+                    )
+                    column = None
+
                 if column is not None:
                     self._columns[key(binding)] = column
 
@@ -841,17 +850,28 @@ class ResourceMapping:
                 if column.is_string:
                     yield column
 
-    def _unique_columns(self) -> Iterator[Column]:
-        """Yield the written columns clients read, whose values no two resources share."""
-        for column in self._columns.values():
-            if column.concealed or not column.writable or column.in_entry:
-                continue
+    def _unique_attributes(self) -> dict[str, AttributeBinding]:
+        """Return the attributes whose values no two resources share, by URN.
 
-            if column.binding.get_annotation(Uniqueness) in (
-                Uniqueness.server,
-                Uniqueness.global_,
-            ):
-                yield column
+        They may be held by the record, by an Entry, by the entries of a
+        collection, or be the value of a Link. A value the storage only reads
+        counts too, as clients read it. The id is left out: the storage
+        generates it.
+        """
+        columns = [
+            *(column for column in self._columns.values() if column is not self._id),
+            *(
+                column
+                for collection in self._all_collections()
+                for name, column in collection.columns.items()
+                if collection.owned or name == "value"
+            ),
+        ]
+        return {
+            column.binding.urn: column.binding
+            for column in columns
+            if _unique(column.binding)
+        }
 
     def _returned_collections(
         self, parameters: ResponseParameters[Any] | None = None
@@ -871,3 +891,7 @@ class ResourceMapping:
         return [
             collection for collection in collections if collection.binding.urn in kept
         ]
+
+
+def _unique(binding: AttributeBinding) -> bool:
+    return binding.get_annotation(Uniqueness) in (Uniqueness.server, Uniqueness.global_)

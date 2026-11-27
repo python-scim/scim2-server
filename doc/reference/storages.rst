@@ -13,6 +13,8 @@ resources in memory.
 .. autoclass:: scim2_server.storage.SearchPage
    :members:
 
+.. autofunction:: scim2_server.storage.unique_values
+
 .. autoclass:: scim2_server.memory.InMemoryStorage
    :members: generate_id, next_version, operation
 

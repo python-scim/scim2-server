@@ -19,7 +19,6 @@ from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import ScimFilter
 from scim2_models import SearchRequest
-from scim2_models import Uniqueness
 from scim2_models import UniquenessException
 from scim2_models.path import CompareOperator
 from scim2_models.path import Comparison
@@ -30,6 +29,7 @@ from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
 from scim2_server.storage import projection
 from scim2_server.storage import search_page
+from scim2_server.storage import unique_values
 from scim2_server.utils import parametrize
 
 
@@ -196,7 +196,7 @@ class InMemoryStorage(ScimStorage):
     def __init__(self, clock: Callable[[], datetime.datetime] = utcnow) -> None:
         self._resources: dict[str | None, dict[str, Resource[Any]]] = {}
         self._owners: dict[str, dict[Any, Key]] = {}
-        self._unique_values: dict[Key, dict[str, Any]] = {}
+        self._unique_values: dict[Key, dict[str, set[Any]]] = {}
         self._equalities: dict[
             str | None, dict[AttributeBinding, dict[Any, set[str]]]
         ] = {}
@@ -391,22 +391,29 @@ class InMemoryStorage(ScimStorage):
         self._equal_values.setdefault(key, {})[binding] = value
         self._equalities[key[0]][binding].setdefault(value, set()).add(key[1])
 
-    def _store(self, resource: Resource[Any], values: dict[str, Any]) -> None:
+    def _store(self, resource: Resource[Any], values: dict[str, set[Any]]) -> None:
         """Keep a resource under its resource type and its identifier, and index its values."""
         key = _key(resource)
         self._remove(key)
         self._resources.setdefault(key[0], {})[key[1]] = resource
         self._unique_values[key] = values
-        for urn, value in values.items():
-            self._owners.setdefault(urn, {})[value] = key
+        for urn, held in values.items():
+            owners = self._owners.setdefault(urn, {})
+            for value in held:
+                owners[value] = key
+
         for binding in self._equalities.get(key[0], {}):
             self._index_equality(resource, binding)
 
     def _remove(self, key: Key) -> None:
         """Forget a resource and its indexed values."""
         self._resources.get(key[0], {}).pop(key[1], None)
-        for urn, value in self._unique_values.pop(key, {}).items():
-            del self._owners[urn][value]
+        for urn, held in self._unique_values.pop(key, {}).items():
+            owners = self._owners[urn]
+            for value in held:
+                if owners.get(value) == key:
+                    del owners[value]
+
         for binding, value in self._equal_values.pop(key, {}).items():
             self._equalities[key[0]][binding][value].discard(key[1])
 
@@ -427,37 +434,30 @@ class InMemoryStorage(ScimStorage):
             raise PreconditionFailedException
 
     def _check_uniqueness(
-        self, resource: Resource[Any], values: dict[str, Any]
+        self, resource: Resource[Any], values: dict[str, set[Any]]
     ) -> None:
         """Refuse a resource sharing a unique value with another resource."""
         key = _key(resource)
-        for urn, value in values.items():
-            if self._owners.get(urn, {}).get(value, key) != key:
+        for urn, held in values.items():
+            owners = self._owners.get(urn, {})
+            if any(owners.get(value, key) != key for value in held):
                 raise UniquenessException()
 
-    def _values_of(self, resource: Resource[Any]) -> dict[str, Any]:
+    def _values_of(self, resource: Resource[Any]) -> dict[str, set[Any]]:
         """Return the unique values of a resource, by the URN of their attribute.
 
-        Per RFC 7643 erratum 8279, the uniqueness applies to the resources
-        using the schema that declares the attribute, whatever their resource
-        type. The URN of an attribute holds its schema, so two resources clash
-        when they hold the same value under the same URN. A missing value
-        never clashes, as a SQL NULL does not.
-
-        The values are compared under the policy of the write that stored
-        them, so a storage serves the resources of a single policy.
+        A value the policy cannot compare never clashes, as a missing value
+        does not. The values are compared under the policy of the write that
+        stored them, so a storage serves the resources of a single policy.
         """
-        unique_paths = parametrize(Path, type(resource)).iter_paths(
-            include_subattributes=False,
-            uniqueness=[Uniqueness.server, Uniqueness.global_],
-        )
-        values = {}
-        for path in unique_paths:
-            attribute = cast(AttributeBinding, path.resolve())
-            value = self._comparable_value(resource, attribute)
-            if value is not None:
-                values[attribute.urn] = _hashable(value)
-        return values
+        return {
+            urn: {
+                _hashable(comparable)
+                for _, comparable in pairs
+                if comparable is not None
+            }
+            for urn, pairs in unique_values(resource).items()
+        }
 
     @staticmethod
     def _comparable_value(resource: Resource[Any], attribute: AttributeBinding) -> Any:
