@@ -1,6 +1,16 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- :mod:`scim2_server.mapping` is the base of the storages that map SCIM resources to the records
+  of an ORM: the declaration of a mapping, its checks, the translation of the filters and of the
+  sorts into the conditions of the ORM, the reading of the records, and the checks of the writes.
+  scim2-django and scim2-sqlalchemy build on it. Its API may change in any minor version.
+
 [0.8.9] - 2026-11-26
 --------------------
 

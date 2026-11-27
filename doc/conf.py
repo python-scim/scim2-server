@@ -90,6 +90,7 @@ REFERENCE_ALIASES = {
 nitpick_ignore_regex = [
     ("py:class", r"collections\.abc\.Callable\[\[\]"),
     ("py:class", r"dict\[str"),
+    ("py:class", r"dict\[str \| None"),
     ("py:class", r"collections\.abc\.Mapping\[str"),
 ]
 
@@ -98,6 +99,7 @@ nitpick_ignore = [
     ("py:class", "scim2_server.service.ModelT"),
     ("py:class", "scim2_server.service.DiscoveryResourceT"),
     ("py:class", "scim2_server.testing.T"),
+    ("py:class", "scim2_server.mapping.filters.C"),
     ("py:class", "ModelT"),
     ("py:class", "DiscoveryResourceT"),
     ("py:class", "T"),
