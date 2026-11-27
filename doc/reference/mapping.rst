@@ -53,7 +53,7 @@ Filters and sorts
 -----------------
 
 .. automodule:: scim2_server.mapping.filters
-   :members: Predicates, where, compare, present, entry_present, sort_target, holds
+   :members: Predicates, where, compare, present, entry_present, sort_target, holds, holds_any
 
 Reading and writing
 -------------------

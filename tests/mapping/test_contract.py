@@ -6,6 +6,7 @@ from .backend import FakeStorage
 from .tables import UNDATED
 from .tables import WORK_EMAIL
 from .tables import groups_mapping
+from .tables import mailbox_mapping
 from .tables import users_mapping
 
 
@@ -18,14 +19,20 @@ def one_work_email(user):
 
 
 class TestMappedStorage(ScimStorageContract):
-    """Users and groups with a version counter and dates."""
+    """Users, groups and mailboxes with a version counter and dates, or no version for the mailboxes."""
 
     supports_root_search = False
+    stores_mailboxes = True
 
     @pytest.fixture
     def storage(self, provider):
-        mappings = {"User": users_mapping(), "Group": groups_mapping()}
-        return FakeStorage(mappings, provider)
+        mappings = {
+            "User": users_mapping(),
+            "Group": groups_mapping(),
+            "Mailbox": mailbox_mapping("Mailbox"),
+            "SharedMailbox": mailbox_mapping("SharedMailbox"),
+        }
+        return FakeStorage(mappings, provider, version_key=b"secret")
 
 
 class TestMappedStorageWithHashes(ScimStorageContract):

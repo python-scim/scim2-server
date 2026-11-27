@@ -123,6 +123,12 @@ suite then checks that the storage leaves these dates empty. For a storage that 
 the password of the users, set :attr:`~scim2_server.testing.ScimStorageContract.stores_password`
 to :data:`False`.
 
+The suite checks the uniqueness of sub-attributes and of multi-valued attributes on
+:class:`~scim2_server.testing.Mailbox` resources. To run these tests, set
+:attr:`~scim2_server.testing.ScimStorageContract.stores_mailboxes` to :data:`True`, and serve the
+``Mailbox`` and ``SharedMailbox`` resource types. Both use the
+:class:`~scim2_server.testing.Mailbox` model.
+
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
 and a sort with :class:`~scim2_models.InvalidPathException`. The suite skips the filters and the
 sorts the storage refuses, and checks the others:

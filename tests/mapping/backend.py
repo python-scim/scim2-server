@@ -12,7 +12,6 @@ from typing import Any
 from scim2_models import AttributeBinding
 from scim2_models import Mutability
 from scim2_models import NotFoundException
-from scim2_models import Path
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
@@ -29,10 +28,12 @@ from scim2_server.mapping.declaration import mutabilities
 from scim2_server.mapping.filters import as_stored
 from scim2_server.mapping.filters import compare
 from scim2_server.mapping.filters import entry_present
+from scim2_server.mapping.filters import holds_any
 from scim2_server.mapping.filters import sort_target
 from scim2_server.mapping.filters import where
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
+from scim2_server.storage import unique_values
 
 Row = dict[str, Any]
 Predicate = Callable[[Row], bool]
@@ -570,25 +571,40 @@ class FakeStorage(ScimStorage):
         resource: Resource[Any],
         stored: Resource[Any] | None,
     ) -> None:
-        others = self.conditions.true()
-        if stored is not None:
-            others = self.conditions.negate(self._with_id(mapping, str(stored.id)))
+        """Refuse a resource holding a unique value another resource holds.
 
-        for column in mapping._unique_columns():
-            value = Path(column.binding.urn).get(resource, strict=False)
-            current = None
-            if stored is not None:
-                current = Path(column.binding.urn).get(stored, strict=False)
+        Per RFC 7643 erratum 8279, the values are looked for in every mapping
+        sharing the attribute. A value the stored resource holds is not checked.
+        """
+        held = {} if stored is None else unique_values(stored, self.policy)
+        for urn, pairs in unique_values(resource, self.policy).items():
+            kept = [comparable for _, comparable in held.get(urn, [])]
+            values = [
+                value
+                for value, comparable in pairs
+                if comparable is not None and comparable not in kept
+            ]
+            if values:
+                self._check_values(mapping, urn, values, stored)
 
-            if value is None or conversion.comparable(value) == conversion.comparable(
-                current
-            ):
+    def _check_values(
+        self,
+        mapping: FakeMapping,
+        urn: str,
+        values: list[Any],
+        stored: Resource[Any] | None,
+    ) -> None:
+        for other in self.mappings.values():
+            binding = other._unique_attributes().get(urn)
+            if binding is None:
                 continue
 
-            taken = compare(
-                mapping, self.conditions, self.policy, column, CompareOperator.eq, value
-            )
-            if self._find(mapping, self.conditions.all([others, taken])):
+            taken = holds_any(other, self.conditions, self.policy, binding, values)
+            if other is mapping and stored is not None:
+                itself = self._with_id(mapping, str(stored.id))
+                taken = self.conditions.all([self.conditions.negate(itself), taken])
+
+            if self._find(other, taken):
                 raise UniquenessException
 
     def _links(

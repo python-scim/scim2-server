@@ -13,9 +13,12 @@ from scim2_models import Filter
 from scim2_models import InvalidCursorException
 from scim2_models import InvalidFilterException
 from scim2_models import InvalidPathException
+from scim2_models import Meta
+from scim2_models import Mutability
 from scim2_models import NotFoundException
 from scim2_models import Resource
 from scim2_models import ResourceType
+from scim2_models import Returned
 from scim2_models import Schema
 from scim2_models import ScimPolicy
 from scim2_models import ScimProvider
@@ -29,6 +32,7 @@ from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
 from scim2_server.storage import SearchPage
 from scim2_server.testing import AsyncScimStorageContract
+from scim2_server.testing import Mailbox
 from scim2_server.testing import ScimStorageContract
 from scim2_server.utils import load_default_resource_types
 from scim2_server.utils import load_default_schemas
@@ -36,12 +40,16 @@ from scim2_server.utils import load_default_service_provider_config
 
 
 class TestInMemoryStorage(ScimStorageContract):
+    stores_mailboxes = True
+
     @pytest.fixture
     def storage(self):
         return InMemoryStorage()
 
 
 class TestAsyncInMemoryStorage(AsyncScimStorageContract):
+    stores_mailboxes = True
+
     @pytest.fixture
     def async_storage(self):
         return AsyncInMemoryStorage()
@@ -417,6 +425,21 @@ def test_an_equality_search_for_a_value_the_policy_cannot_compare(
         )
 
 
+def test_an_equality_search_skips_the_stored_values_the_policy_cannot_compare(
+    user_type, scim_provider
+):
+    """A stored value the policy refuses matches nothing, and the search finds the other resources."""
+    storage = InMemoryStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="bjensen!"))
+    storage.create(user_type, User(user_name="jsmith"))
+
+    with ScimPolicy(comparison_key=refuse_exclamation_marks):
+        assert found_user_names(storage, user_type, User, 'userName eq "JSmith"') == [
+            "jsmith"
+        ]
+
+
 def test_operations_can_be_nested(user_type, scim_provider):
     """The lock of an operation can be taken again inside it."""
     storage = InMemoryStorage()
@@ -572,25 +595,68 @@ def test_uniqueness_of_an_extension_spans_the_resources_it_extends():
         )
 
 
-def test_multi_valued_and_complex_unique_values_clash_when_equal():
-    """Equal lists, or equal complex values, of a unique attribute clash."""
+def test_hidden_unique_values_are_not_checked():
+    """A unique value clients never read can be held twice: refusing it would tell that another resource holds it."""
+
+    class Lock(ComplexAttribute):
+        code: Annotated[str | None, Uniqueness.server] = None
+
+    class Key(ComplexAttribute):
+        code: Annotated[str | None, Mutability.write_only, Uniqueness.server] = None
+
+    class Safe(Resource):
+        __schema__ = URN("urn:example:2.0:Safe")
+        pin: Annotated[str | None, Returned.never, Uniqueness.server] = None
+        lock: Annotated[Lock | None, Returned.never] = None
+        key: Key | None = None
+
+    storage = InMemoryStorage()
+    safe_type = ResourceType.from_resource(Safe)
+    for _ in range(2):
+        storage.create(
+            safe_type, Safe(pin="1234", lock=Lock(code="a"), key=Key(code="b"))
+        )
+
+
+def test_loaded_resources_sharing_a_unique_value_can_be_deleted():
+    """Resources loaded with a shared unique value are deleted one after the other, and free it."""
+    mailbox_type = ResourceType.from_resource(Mailbox)
+    first, second = (
+        Mailbox(
+            id=mailbox_id,
+            aliases=["babs"],
+            meta=Meta(resource_type=mailbox_type.name, version='W/"1"'),
+        )
+        for mailbox_id in ("1", "2")
+    )
+    storage = InMemoryStorage()
+    storage.resources = [first, second]
+
+    storage.delete(mailbox_type, "1")
+    storage.delete(mailbox_type, "2")
+
+    storage.create(mailbox_type, Mailbox(aliases=["babs"]))
+
+
+def test_complex_unique_values_clash_when_equal():
+    """Equal complex values of a unique attribute clash, and so do equal entries of a unique multi-valued complex attribute."""
 
     class Size(ComplexAttribute):
         width: int | None = None
 
     class Badge(Resource):
         __schema__ = URN("urn:example:2.0:Badge")
-        codes: Annotated[list[str] | None, Uniqueness.server] = None
         size: Annotated[Size | None, Uniqueness.server] = None
+        sizes: Annotated[list[Size] | None, Uniqueness.server] = None
 
     storage = InMemoryStorage()
     badge_type = ResourceType.from_resource(Badge)
-    storage.create(badge_type, Badge(codes=["a", "b"], size=Size(width=1)))
-    storage.create(badge_type, Badge(codes=["a"], size=Size(width=2)))
-    with pytest.raises(UniquenessException):
-        storage.create(badge_type, Badge(codes=["a", "b"]))
+    storage.create(badge_type, Badge(size=Size(width=1), sizes=[Size(width=1)]))
+    storage.create(badge_type, Badge(size=Size(width=2), sizes=[Size(width=2)]))
     with pytest.raises(UniquenessException):
         storage.create(badge_type, Badge(size=Size(width=2)))
+    with pytest.raises(UniquenessException):
+        storage.create(badge_type, Badge(sizes=[Size(width=3), Size(width=1)]))
 
 
 @pytest.mark.parametrize("root", [False, True])

@@ -5,6 +5,7 @@ from scim2_models import User
 from scim2_server.mapping import Entry
 from scim2_server.mapping import Link
 from scim2_server.mapping import Many
+from scim2_server.testing import Mailbox
 
 from .backend import FakeMapping
 from .backend import Owned
@@ -55,7 +56,33 @@ groups.field("created")
 groups.field("last_modified")
 groups.field("version", null=False, default=1)
 
-TABLES = (users, emails, groups)
+
+def mailbox_tables(name):
+    """Return the tables of a mailbox, its addresses and its aliases."""
+    mailboxes = Table(name)
+    for field in ("display_name", "owner", "owner_name"):
+        mailboxes.field(field)
+
+    addresses = Table(f"{name}_addresses")
+    addresses.field("mailbox", null=False)
+    addresses.field("value")
+    addresses.field("type")
+    aliases = Table(f"{name}_aliases")
+    aliases.field("mailbox", null=False)
+    aliases.field("value")
+    return mailboxes, addresses, aliases
+
+
+MAILBOX_TABLES = {
+    name: mailbox_tables(name.lower()) for name in ("Mailbox", "SharedMailbox")
+}
+
+TABLES = (
+    users,
+    emails,
+    groups,
+    *(t for tables in MAILBOX_TABLES.values() for t in tables),
+)
 
 DEFAULT = object()
 
@@ -133,3 +160,19 @@ WORK_EMAIL = {
     "emails": Entry({"value": users.fields["email"]}, type="work", primary=True)
 }
 UNDATED = {"meta.created": None, "meta.lastModified": None}
+
+
+def mailbox_mapping(name, changes=None):
+    mailboxes, addresses, aliases = MAILBOX_TABLES[name]
+    attributes = {
+        "id": mailboxes.id,
+        "displayName": mailboxes.fields["display_name"],
+        "addresses": Many(
+            Owned(addresses, "mailbox"),
+            {"value": addresses.fields["value"], "type": addresses.fields["type"]},
+        ),
+        "aliases": Many(Owned(aliases, "mailbox"), aliases.fields["value"]),
+        "owner.value": mailboxes.fields["owner"],
+        "owner.display": mailboxes.fields["owner_name"],
+    }
+    return FakeMapping(Mailbox, mailboxes, attributes | (changes or {}))

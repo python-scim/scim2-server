@@ -1,6 +1,23 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- :class:`~scim2_server.testing.ScimStorageContract` checks the uniqueness of sub-attributes and
+  of multi-valued attributes, for a storage setting
+  :attr:`~scim2_server.testing.ScimStorageContract.stores_mailboxes`.
+  :func:`~scim2_server.storage.unique_values` lists the values a storage checks.
+
+Changed
+^^^^^^^
+- A unique sub-attribute is unique among the resources, and each value of a multi-valued attribute
+  counts on its own: ``["a", "b"]`` and ``["a"]`` now clash.
+- A unique value clients never read is not checked, as a 409 would tell that another resource
+  holds it. A mapping refuses such an attribute.
+
 [0.9.0] - 2026-11-27
 --------------------
 

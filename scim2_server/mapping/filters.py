@@ -12,6 +12,7 @@ from functools import partial
 from typing import Any
 from typing import Protocol
 from typing import TypeVar
+from typing import cast
 
 from scim2_models import AttributeBinding
 from scim2_models import InvalidFilterException
@@ -452,6 +453,41 @@ def compare(
             conditions.negate(conditions.is_null(column)),
             conditions.compare_text(column, op, value),
         ]
+    )
+
+
+def holds_any(
+    mapping: ResourceMapping,
+    conditions: Predicates[C],
+    policy: ScimPolicy,
+    binding: AttributeBinding,
+    values: list[Any],
+) -> C:
+    """Return the condition that a record holds one of some values of an attribute.
+
+    The attribute is one of the unique attributes of the mapping, and the
+    values are those of a resource, as
+    :func:`~scim2_server.storage.unique_values` returns them. The values are
+    compared as a filter with ``eq`` compares them, in the record, in an
+    Entry, in the entries of a collection or in a Link. The condition does
+    not leave out the written resource: the storage does.
+    """
+
+    def any_value(inner: Predicates[C], column: Column) -> C:
+        return inner.any(
+            compare(mapping, inner, policy, column, CompareOperator.eq, value)
+            for value in values
+        )
+
+    holders = [
+        (collection, cast(Column, column))
+        for collection, column in mapping._lookup(binding)
+    ]
+    return conditions.any(
+        any_value(conditions, column)
+        if collection is None
+        else conditions.exists(collection, partial(any_value, column=column))
+        for collection, column in holders
     )
 
 

@@ -8,11 +8,20 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 from typing import cast
+from weakref import WeakKeyDictionary
 
+from scim2_models import AttributeBinding
+from scim2_models import Mutability
+from scim2_models import Path
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ResponseParameters
+from scim2_models import Returned
+from scim2_models import ScimPolicy
 from scim2_models import SearchRequest
+from scim2_models import Uniqueness
+
+from scim2_server.utils import parametrize
 
 
 def _accepts(storage_class: type, method: str, parameter: str) -> bool:
@@ -41,6 +50,93 @@ def projection(
     if not storage._get_takes_response_parameters:
         return {}
     return {"response_parameters": response_parameters}
+
+
+def unique_values(
+    resource: Resource[Any], policy: ScimPolicy | None = None
+) -> dict[str, list[tuple[Any, Any]]]:
+    """Return the values of a resource that no other resource may hold, by the URN of their attribute.
+
+    The attributes are those whose uniqueness is ``server`` or ``global``,
+    at any depth, such as ``userName`` or ``emails.value``. Each value of a
+    multi-valued attribute counts on its own. A missing value is left out.
+
+    Per RFC 7643 erratum 8279, the uniqueness applies to the resources using
+    the schema that declares the attribute, whatever their resource type. The
+    URN of an attribute holds its schema, so two resources clash when they
+    hold the same value under the same URN.
+
+    Each value comes with the form it is compared in, as
+    :meth:`~scim2_models.AttributeBinding.comparable` returns it under the
+    policy. This form is :data:`None` when the policy cannot compare the
+    string: such a value clashes with no other value.
+
+    The values clients never read, such as a write-only one, are left out:
+    refusing one would tell that another resource holds it.
+
+    >>> from scim2_models import User
+    >>> unique_values(User(user_name="BJensen"))
+    {'urn:ietf:params:scim:schemas:core:2.0:User:userName': [('BJensen', 'bjensen')]}
+    """
+    model_path = parametrize(Path, type(resource))
+    values: dict[str, list[tuple[Any, Any]]] = {}
+    for attribute in _unique_attributes(type(resource)):
+        held = model_path(attribute.urn).get(resource, strict=False)
+        pairs = [
+            (value, _comparable(attribute, value, policy))
+            for value in (held if isinstance(held, list) else [held])
+            if value is not None
+        ]
+        if pairs:
+            values[attribute.urn] = pairs
+
+    return values
+
+
+_UNIQUE_ATTRIBUTES: "WeakKeyDictionary[type, list[AttributeBinding]]" = (
+    WeakKeyDictionary()
+)
+
+
+def _unique_attributes(model: type[Resource[Any]]) -> list[AttributeBinding]:
+    """Return the unique attributes of a model that clients read, once per model."""
+    attributes = _UNIQUE_ATTRIBUTES.get(model)
+    if attributes is None:
+        bindings = (path.resolve() for path in parametrize(Path, model).iter_paths())
+        attributes = [
+            binding
+            for binding in bindings
+            if binding is not None
+            and binding.get_annotation(Uniqueness)
+            in (Uniqueness.server, Uniqueness.global_)
+            and not _hidden(binding)
+        ]
+        _UNIQUE_ATTRIBUTES[model] = attributes
+
+    return attributes
+
+
+def _hidden(attribute: AttributeBinding) -> bool:
+    """Tell whether clients never read an attribute, on its own or through its parent."""
+    annotation = attribute.model.get_field_annotation
+    returned = {
+        annotation(attribute.field_name, Returned),
+        attribute.get_annotation(Returned),
+    }
+    mutability = {
+        annotation(attribute.field_name, Mutability),
+        attribute.get_annotation(Mutability),
+    }
+    return Returned.never in returned or Mutability.write_only in mutability
+
+
+def _comparable(
+    attribute: AttributeBinding, value: Any, policy: ScimPolicy | None
+) -> Any:
+    try:
+        return attribute.comparable(value, policy)
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -132,7 +228,12 @@ class ScimStorage(ABC):
     - A resource that does not exist raises
       :class:`~scim2_models.NotFoundException`.
     - A value already taken by an attribute whose uniqueness is ``server`` or
-      ``global`` raises :class:`~scim2_models.UniquenessException`.
+      ``global`` raises :class:`~scim2_models.UniquenessException`. This
+      holds for sub-attributes too, such as ``emails.value``. Each value of a
+      multi-valued attribute counts on its own, and :func:`unique_values`
+      lists them. Two equal values in the same resource do not clash, and
+      the values clients never read are not checked. A storage may let two
+      concurrent writes take the same value.
     - It supports what the :class:`~scim2_models.ServiceProviderConfig` of the
       server announces, such as sorting. The server refuses the rest before
       calling the storage.
