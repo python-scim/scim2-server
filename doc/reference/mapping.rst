@@ -42,7 +42,7 @@ Resolution
 ----------
 
 .. autoclass:: scim2_server.mapping.ResourceMapping
-   :members: schemas
+   :members: schemas, unique_attributes
 
 .. autoclass:: scim2_server.mapping.MappingProblem
 
@@ -53,7 +53,7 @@ Filters and sorts
 -----------------
 
 .. automodule:: scim2_server.mapping.filters
-   :members: Predicates, where, compare, present, entry_present, sort_target, holds, holds_any
+   :members: Predicates, where, compare, present, entry_present, sort_target, holds
 
 Reading and writing
 -------------------

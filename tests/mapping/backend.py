@@ -4,7 +4,9 @@ import datetime
 import operator
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Iterator
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Any
@@ -19,7 +21,6 @@ from scim2_models import ResponseParameters
 from scim2_models import ScimPolicy
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
-from scim2_models import UniquenessException
 from scim2_models.path import CompareOperator
 
 from scim2_server import mapping as core
@@ -28,12 +29,11 @@ from scim2_server.mapping.declaration import mutabilities
 from scim2_server.mapping.filters import as_stored
 from scim2_server.mapping.filters import compare
 from scim2_server.mapping.filters import entry_present
-from scim2_server.mapping.filters import holds_any
 from scim2_server.mapping.filters import sort_target
 from scim2_server.mapping.filters import where
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
-from scim2_server.storage import unique_values
+from scim2_server.storage import uniqueness_conflict
 
 Row = dict[str, Any]
 Predicate = Callable[[Row], bool]
@@ -132,6 +132,22 @@ def related(collection: core.Collection, row: Row) -> list[Row]:
 
     found = relation.target.rows.values()
     return [entry for entry in found if row["id"] in entry[relation.field.name]]
+
+
+def _keys(
+    row: Row, field: Field, column: core.Column | None, policy: ScimPolicy
+) -> list[Any]:
+    """Return the values of a row a unique constraint compares, as the filters compare them."""
+    held = row[field.name]
+    values = [
+        value
+        for value in (held if isinstance(held, list) else [held])
+        if value is not None
+    ]
+    if column is None or not column.is_string:
+        return values
+
+    return [column.binding.comparable(value, policy) for value in values]
 
 
 def needs_value(field: Field) -> bool:
@@ -473,10 +489,11 @@ class FakeStorage(ScimStorage):
     ) -> Resource[Any]:
         mapping = self.mappings[str(resource_type.name)]
         conversion.check_storable(mapping, resource, None)
-        self._check_uniqueness(mapping, resource, None)
         links = self._links(mapping, resource)
         row = mapping.record.new()
-        self._write(mapping, resource, row, links, creating=True)
+        with self._unique_constraints():
+            self._write(mapping, resource, row, links, creating=True)
+
         return self._to_scim(resource_type, row)
 
     def update(
@@ -491,12 +508,13 @@ class FakeStorage(ScimStorage):
         stored = self._to_scim(resource_type, row)
         _check_version(stored, expected_version)
         conversion.check_storable(mapping, resource, stored)
-        self._check_uniqueness(mapping, resource, stored)
         links = self._links(mapping, resource)
-        if mapping.version is not None:
-            row[mapping.version.name] += 1
+        with self._unique_constraints():
+            if mapping.version is not None:
+                row[mapping.version.name] += 1
 
-        self._write(mapping, resource, row, links, creating=False)
+            self._write(mapping, resource, row, links, creating=False)
+
         return self._to_scim(resource_type, row)
 
     def delete(
@@ -509,6 +527,11 @@ class FakeStorage(ScimStorage):
         mapping = self.mappings[str(resource_type.name)]
         row = self._load(resource_type, resource_id)
         _check_version(self._to_scim(resource_type, row), expected_version)
+        for collection in mapping._all_collections():
+            if isinstance(collection.relation, Owned):
+                for entry in related(collection, row):
+                    del collection.relation.target.rows[entry["id"]]
+
         del mapping.record.rows[row["id"]]
 
     def _write(
@@ -565,47 +588,57 @@ class FakeStorage(ScimStorage):
 
             relation.target.insert(entry_row)
 
-    def _check_uniqueness(
-        self,
-        mapping: FakeMapping,
-        resource: Resource[Any],
-        stored: Resource[Any] | None,
-    ) -> None:
-        """Refuse a resource holding a unique value another resource holds.
+    @contextmanager
+    def _unique_constraints(self) -> Iterator[None]:
+        """Run a write as a transaction, and roll it back when it breaks a unique constraint.
 
-        Per RFC 7643 erratum 8279, the values are looked for in every mapping
-        sharing the attribute. A value the stored resource holds is not checked.
+        As a database would, each field holding a unique attribute gets a
+        constraint comparing the values as the filters do. Two mappings
+        sharing a table share its constraints.
         """
-        held = {} if stored is None else unique_values(stored, self.policy)
-        for urn, pairs in unique_values(resource, self.policy).items():
-            kept = [comparable for _, comparable in held.get(urn, [])]
-            values = [
-                value
-                for value, comparable in pairs
-                if comparable is not None and comparable not in kept
+        tables = {
+            table
+            for mapping in self.mappings.values()
+            for table in (
+                mapping.record,
+                *(c.relation.target for c in mapping._all_collections()),
+            )
+        }
+        snapshot = {
+            table: ({key: dict(row) for key, row in table.rows.items()}, table.next_key)
+            for table in tables
+        }
+        yield
+        for binding, table, field, column in self._constraints():
+            keys = [
+                key
+                for row in table.rows.values()
+                for key in _keys(row, field, column, self.policy)
             ]
-            if values:
-                self._check_values(mapping, urn, values, stored)
-
-    def _check_values(
-        self,
-        mapping: FakeMapping,
-        urn: str,
-        values: list[Any],
-        stored: Resource[Any] | None,
-    ) -> None:
-        for other in self.mappings.values():
-            binding = other._unique_attributes().get(urn)
-            if binding is None:
+            if len(keys) == len(set(keys)):
                 continue
 
-            taken = holds_any(other, self.conditions, self.policy, binding, values)
-            if other is mapping and stored is not None:
-                itself = self._with_id(mapping, str(stored.id))
-                taken = self.conditions.all([self.conditions.negate(itself), taken])
+            for table, (rows, next_key) in snapshot.items():
+                table.rows, table.next_key = rows, next_key
 
-            if self._find(other, taken):
-                raise UniquenessException
+            raise uniqueness_conflict(binding)
+
+    def _constraints(
+        self,
+    ) -> Iterator[tuple[AttributeBinding, Table, Field, core.Column | None]]:
+        """Yield the unique constraints, with their attribute and the column comparing the strings of each."""
+        for mapping in self.mappings.values():
+            for binding in mapping.unique_attributes().values():
+                for collection, column in mapping._lookup(binding):
+                    relation = None if collection is None else collection.relation
+                    if relation is None:
+                        yield binding, mapping.record, column.field, column
+                    elif isinstance(relation, Owned):
+                        yield binding, relation.target, column.field, column
+                    elif isinstance(relation, Reference | References):
+                        yield binding, mapping.record, relation.field, None
+                    else:
+                        raise NotImplementedError
 
     def _links(
         self, mapping: FakeMapping, resource: Resource[Any]

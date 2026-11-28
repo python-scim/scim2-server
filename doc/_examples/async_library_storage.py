@@ -12,9 +12,9 @@ from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import SearchRequest
-from scim2_models import UniquenessException
 
 from doc._examples.library_storage import TABLES
+from doc._examples.library_storage import uniqueness_conflict_of
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import SearchPage
 
@@ -127,9 +127,9 @@ class AsyncLibraryStorage(AsyncScimStorage):
         try:
             yield connection
             await connection.commit()
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as error:
             await connection.rollback()
-            raise UniquenessException from None
+            raise uniqueness_conflict_of(error) from None
 
     async def search(
         self,

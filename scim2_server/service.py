@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 from pydantic_core import from_json
+from scim2_models import AttributeBinding
 from scim2_models import AuthenticationScheme
 from scim2_models import BaseModel
 from scim2_models import Bulk
@@ -56,6 +57,8 @@ from scim2_server.routing import Operation
 from scim2_server.routing import Target
 from scim2_server.routing import match
 from scim2_server.storage import SearchPage
+from scim2_server.storage import _attribute_path
+from scim2_server.storage import _unique_values
 from scim2_server.utils import parametrize
 
 if TYPE_CHECKING:
@@ -102,6 +105,34 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 DiscoveryResourceT = TypeVar(
     "DiscoveryResourceT", ResourceType, Schema, ServiceProviderConfig
 )
+
+
+def _repeated(resource: Resource[Any] | None) -> list[tuple[AttributeBinding, Any]]:
+    """Return the unique values a resource holds more than once, with their attribute, in the order of the attributes."""
+    if resource is None:
+        return []
+
+    repeated = []
+    for attribute, values in _unique_values(resource).items():
+        seen: set[Any] = set()
+        for value in values:
+            if value in seen:
+                repeated.append((attribute, value))
+
+            seen.add(value)
+
+    return repeated
+
+
+def _refuse_repeated(
+    resource: Resource[Any], held: list[tuple[AttributeBinding, Any]]
+) -> None:
+    """Refuse the unique values a resource holds more than once, but those in held."""
+    refused = [pair for pair in _repeated(resource) if pair not in held]
+    if refused:
+        attribute, _ = refused[0]
+        path = _attribute_path(attribute)
+        raise InvalidValueException(detail=f"The attribute {path} holds a value twice")
 
 
 def is_json_media_type(content_type: str | None) -> bool:
@@ -716,13 +747,38 @@ class ScimService:
     def read_creation(
         self, resource_type: ResourceType, body: bytes, content_type: str | None
     ) -> Resource[Any]:
-        """Validate the body of a creation request."""
-        return self.read_body(
+        """Validate the body of a creation request.
+
+        :raises ~scim2_models.InvalidValueException: When the resource holds a
+            unique value twice.
+        """
+        resource = self.read_body(
             self.get_model(resource_type),
             body,
             content_type,
             Context.RESOURCE_CREATION_REQUEST,
         )
+        self.check_unique_values(resource)
+        return resource
+
+    @staticmethod
+    def check_unique_values(
+        resource: Resource[Any], current: Resource[Any] | None = None
+    ) -> None:
+        """Refuse a resource holding the same unique value twice.
+
+        Two values are the same when a filter with ``eq`` finds them equal.
+        A storage relies on unique constraints. They would refuse such a
+        resource too, but with a 409, although no other resource holds the
+        value. A value that ``current``, the stored state of the resource,
+        already holds twice is accepted, so that such a resource can still
+        be changed.
+
+        :raises ~scim2_models.InvalidValueException: When an attribute whose
+            uniqueness is ``server`` or ``global`` holds a value twice, such
+            as two emails with the same unique ``value``.
+        """
+        _refuse_repeated(resource, _repeated(current))
 
     def creation_response(self, base_url: str, created: Resource[Any]) -> ScimResponse:
         """Return the 201 response to a creation, with the location of the resource."""
@@ -1035,9 +1091,15 @@ class ScimService:
         :return: The new state of the resource, or :data:`None` when the
             replacement changes nothing. Such a PUT keeps meta.lastModified and
             the ETag.
+        :raises ~scim2_models.InvalidValueException: When the new state holds
+            a unique value twice.
         """
         self.check_preconditions(current, "PUT", conditions)
-        return replacement if replacement.replace(current) else None
+        if not replacement.replace(current):
+            return None
+
+        self.check_unique_values(replacement, current)
+        return replacement
 
     def replacement_response(
         self,
@@ -1078,9 +1140,16 @@ class ScimService:
         :return: The new state of the resource, or :data:`None` when the
             PATCH changes nothing. Such a PATCH keeps meta.lastModified and the
             ETag.
+        :raises ~scim2_models.InvalidValueException: When the new state holds
+            a unique value twice.
         """
         self.check_preconditions(current, "PATCH", conditions)
-        return current if patch_op.patch(current) else None
+        held = _repeated(current)
+        if not patch_op.patch(current):
+            return None
+
+        _refuse_repeated(current, held)
+        return current
 
     def patch_response(
         self,

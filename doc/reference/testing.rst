@@ -13,4 +13,7 @@ The test suites checking that a storage follows the storage contract. They need 
 
 .. autoclass:: scim2_server.testing.MailboxOwner()
 
+.. autodata:: scim2_server.testing.MAILBOX_TYPE
+   :no-value:
+
 .. autoclass:: scim2_server.testing.AsyncScimStorageContract

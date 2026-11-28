@@ -29,8 +29,7 @@ class TestMappedStorage(ScimStorageContract):
         mappings = {
             "User": users_mapping(),
             "Group": groups_mapping(),
-            "Mailbox": mailbox_mapping("Mailbox"),
-            "SharedMailbox": mailbox_mapping("SharedMailbox"),
+            "Mailbox": mailbox_mapping(),
         }
         return FakeStorage(mappings, provider, version_key=b"secret")
 

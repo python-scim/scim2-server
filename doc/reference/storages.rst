@@ -13,13 +13,13 @@ resources in memory.
 .. autoclass:: scim2_server.storage.SearchPage
    :members:
 
-.. autofunction:: scim2_server.storage.unique_values
+.. autofunction:: scim2_server.storage.uniqueness_conflict
 
 .. autoclass:: scim2_server.memory.InMemoryStorage
    :members: generate_id, next_version, operation
 
 .. autoclass:: scim2_server.memory.AsyncInMemoryStorage
-   :members: resources
+   :members: resources, generate_id
 
 Keyset pagination
 -----------------

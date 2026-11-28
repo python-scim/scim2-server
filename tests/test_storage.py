@@ -4,8 +4,11 @@ import json
 import warnings
 
 import pytest
+from scim2_models import EnterpriseUser
 from scim2_models import InvalidCursorException
+from scim2_models import Path
 from scim2_models import SearchRequest
+from scim2_models import User
 
 from scim2_server.memory import AsyncInMemoryStorage
 from scim2_server.memory import InMemoryStorage
@@ -13,6 +16,7 @@ from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import async_search_page
 from scim2_server.storage import search_page
+from scim2_server.storage import uniqueness_conflict
 
 
 class MinimalStorage(ScimStorage):
@@ -335,3 +339,14 @@ def test_a_cursor_refuses_a_sort_value_it_cannot_hold(
         storage.search(
             [user_type], SearchRequest(cursor="", count=1, sort_by="userName")
         )
+
+
+def test_a_uniqueness_conflict_tells_an_extension_attribute_by_its_urn():
+    """The detail of a 409 on an extension attribute holds its URN, and no value."""
+    urn = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber"
+    binding = Path[User[EnterpriseUser]](urn).resolve()
+
+    conflict = uniqueness_conflict(binding)
+
+    assert conflict.status == 409
+    assert conflict.detail == f"Uniqueness conflict with attribute {urn}"

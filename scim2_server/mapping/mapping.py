@@ -850,13 +850,14 @@ class ResourceMapping:
                 if column.is_string:
                     yield column
 
-    def _unique_attributes(self) -> dict[str, AttributeBinding]:
+    def unique_attributes(self) -> dict[str, AttributeBinding]:
         """Return the attributes whose values no two resources share, by URN.
 
-        They may be held by the record, by an Entry, by the entries of a
-        collection, or be the value of a Link. A value the storage only reads
-        counts too, as clients read it. The id is left out: the storage
-        generates it.
+        A storage puts a unique constraint on the fields holding them. They
+        may be held by the record, by an Entry, by the entries of a
+        collection, or be the value of a Link. A field the storage only reads
+        counts too, as clients read it. The id is left out: it is the primary
+        key.
         """
         columns = [
             *(column for column in self._columns.values() if column is not self._id),

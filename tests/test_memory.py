@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import inspect
 from typing import Annotated
@@ -320,6 +321,122 @@ def test_identifiers_can_be_predictable(user_type, scim_provider):
     assert storage.create(user_type, User(user_name="b")).id == "User-1"
 
 
+def test_a_refused_resource_gets_no_identifier(user_type, scim_provider):
+    """generate_id is called after the unique values are checked, so a refused resource does not call it."""
+
+    class CountingStorage(InMemoryStorage):
+        calls = 0
+
+        def generate_id(self, resource_type, resource):
+            self.calls += 1
+            return super().generate_id(resource_type, resource)
+
+    storage = CountingStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="bjensen"))
+
+    with pytest.raises(UniquenessException):
+        storage.create(user_type, User(user_name="BJensen"))
+
+    assert storage.calls == 1
+
+
+def test_no_chosen_identifier_draws_one(user_type, scim_provider):
+    """A generate_id returning None lets the storage draw an identifier."""
+
+    class DrawingStorage(InMemoryStorage):
+        def generate_id(self, resource_type, resource):
+            return None
+
+    storage = DrawingStorage()
+    User = scim_provider.model_for(user_type)
+    first = storage.create(user_type, User(user_name="bjensen"))
+    second = storage.create(user_type, User(user_name="jsmith"))
+
+    assert first.id
+    assert second.id
+    assert first.id != second.id
+
+
+def test_a_chosen_identifier_already_taken_is_refused(user_type, scim_provider):
+    """An identifier another resource of the type holds raises a 409, and the stored resource is kept.
+
+    Another resource type may hold it, as the storage serves resource types
+    numbered on their own.
+    """
+
+    class FixedStorage(InMemoryStorage):
+        def generate_id(self, resource_type, resource):
+            return "1"
+
+    storage = FixedStorage()
+    group_type = next(rt for rt in scim_provider.resource_types if rt.id == "Group")
+    User = scim_provider.model_for(user_type)
+    Group = scim_provider.model_for(group_type)
+    storage.create(user_type, User(user_name="bjensen"))
+    storage.create(group_type, Group(display_name="admins"))
+
+    with pytest.raises(UniquenessException) as conflict:
+        storage.create(user_type, User(user_name="jsmith"))
+
+    assert conflict.value.detail == "Uniqueness conflict with attribute id"
+    assert storage.get(user_type, "1").user_name == "bjensen"
+    assert found_user_names(storage, user_type, User, 'userName eq "jsmith"') == []
+
+
+def test_an_asynchronous_generate_id_can_await(user_type, scim_provider):
+    """The asynchronous storage awaits its generate_id, which gives the identifier."""
+
+    class AwaitingStorage(AsyncInMemoryStorage):
+        async def generate_id(self, resource_type, resource):
+            await asyncio.sleep(0)
+            return f"remote-{resource.user_name}"
+
+    storage = AwaitingStorage()
+    User = scim_provider.model_for(user_type)
+
+    user = asyncio.run(storage.create(user_type, User(user_name="bjensen")))
+
+    assert user.id == "remote-bjensen"
+    assert storage.storage.get(user_type, "remote-bjensen").user_name == "bjensen"
+
+
+def test_a_value_taken_while_generate_id_awaits_is_refused(user_type, scim_provider):
+    """The unique values are checked again once generate_id returns, and the resource is not stored."""
+
+    class RacingStorage(AsyncInMemoryStorage):
+        async def generate_id(self, resource_type, resource):
+            self.storage.create(user_type, User(user_name="bjensen"))
+            return "late"
+
+    storage = RacingStorage()
+    User = scim_provider.model_for(user_type)
+
+    with pytest.raises(UniquenessException):
+        asyncio.run(storage.create(user_type, User(user_name="BJensen")))
+
+    with pytest.raises(NotFoundException):
+        storage.storage.get(user_type, "late")
+
+
+def test_the_values_generate_id_gives_are_checked(user_type, scim_provider):
+    """A value generate_id writes in the resource is checked and indexed as a value of the client is."""
+
+    class RenamingStorage(InMemoryStorage):
+        def generate_id(self, resource_type, resource):
+            resource.user_name = "bjensen"
+            return None
+
+    storage = RenamingStorage()
+    User = scim_provider.model_for(user_type)
+    storage.create(user_type, User(user_name="draft"))
+
+    with pytest.raises(UniquenessException):
+        storage.create(user_type, User(user_name="other"))
+
+    assert [user.user_name for user in storage.resources] == ["bjensen"]
+
+
 def test_dates_come_from_the_clock(user_type, scim_provider):
     """The dates of the resources come from the given clock."""
     now = datetime.datetime(2024, 3, 14, 6, 0, tzinfo=datetime.UTC)
@@ -569,8 +686,8 @@ def test_uniqueness_does_not_span_schemas():
     storage.create(ResourceType.from_resource(Token), Token(code="x"))
 
 
-def test_uniqueness_of_an_extension_spans_the_resources_it_extends():
-    """An extension attribute is unique among every resource carrying the extension."""
+def test_uniqueness_of_an_extension_holds_within_each_resource_type():
+    """An extension attribute is unique among the resources of a type, and another type carrying the extension may hold its values."""
 
     class Tag(Extension):
         __schema__ = URN("urn:example:2.0:Tag")
@@ -583,16 +700,14 @@ def test_uniqueness_of_an_extension_spans_the_resources_it_extends():
         __schema__ = URN("urn:example:2.0:Token")
 
     storage = InMemoryStorage()
-    storage.create(
-        ResourceType.from_resource(Badge[Tag]),
-        Badge[Tag].model_validate({"urn:example:2.0:Tag": {"code": "x"}}),
-    )
-    storage.create(ResourceType.from_resource(Token), Token())
+    badge_type = ResourceType.from_resource(Badge[Tag])
+    token_type = ResourceType.from_resource(Token[Tag])
+    tagged = {"urn:example:2.0:Tag": {"code": "x"}}
+    storage.create(badge_type, Badge[Tag].model_validate(tagged))
+    storage.create(token_type, Token[Tag].model_validate(tagged))
+
     with pytest.raises(UniquenessException):
-        storage.create(
-            ResourceType.from_resource(Token[Tag]),
-            Token[Tag].model_validate({"urn:example:2.0:Tag": {"code": "x"}}),
-        )
+        storage.create(token_type, Token[Tag].model_validate(tagged))
 
 
 def test_hidden_unique_values_are_not_checked():

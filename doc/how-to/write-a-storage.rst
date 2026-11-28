@@ -159,13 +159,21 @@ and start its version at 1:
 Refuse a duplicate value
 ------------------------
 
-In the default user resource, the ``userName`` of a user is unique, whatever its case. Compare the
-values in the form :meth:`AttributeBinding.comparable <scim2_models.AttributeBinding.comparable>`
-returns, as the filters do. The example relies on ``COLLATE NOCASE``, which only ignores the case
-of ASCII letters: ``Élise`` and ``élise`` remain two users. On a creation and on an update, raise
-:class:`~scim2_models.UniquenessException` when another user already has the value. The ``UNIQUE`` constraint of the table refuses such a write, even when two
-requests arrive at the same time. The example commits each write, and turns the refusal into the
-exception:
+In the default user resource, the ``userName`` of a user is unique, whatever its case. Let the
+database refuse a duplicate value with a unique constraint: it holds even when two requests arrive
+at the same time. Two values that the filters find equal must be equal for the constraint too,
+or a filter with ``eq`` finds two users. The filters compare the values in the form
+:meth:`AttributeBinding.comparable <scim2_models.AttributeBinding.comparable>` returns. The
+example relies on ``COLLATE NOCASE``, which only ignores the case of ASCII letters: ``Élise`` and
+``élise`` remain two users. Document such differences for the users of the storage.
+
+On a creation and on an update, raise :class:`~scim2_models.UniquenessException` when the
+constraint refuses the write. Build it with :func:`~scim2_server.storage.uniqueness_conflict`: its
+detail tells the attribute, and never the value. For a constraint on a field that holds no SCIM
+attribute, raise the exception without detail, and do not pass on the message of the database,
+which may hold the value. Turn only the violations of a unique constraint
+into this exception: another error, such as a missing value, is a bug. The example commits each
+write, and turns the refusal into the exception:
 
 .. tab-set::
    :class: outline
@@ -187,9 +195,14 @@ exception:
          :dedent: 4
 
 A sub-attribute can be unique too, such as the ``value`` of an email in a model of yours. Each
-value of a multi-valued attribute then counts on its own, and two equal values in the same
-resource do not clash. :func:`~scim2_server.storage.unique_values` lists the unique values of a
-resource, by attribute.
+value of a multi-valued attribute then counts on its own: put the constraint on the column of the
+table holding the entries. The server refuses a resource holding the same unique value twice
+before calling the storage. On an update, delete the former entries before inserting the new
+ones, in the same transaction. A resource keeping a value, or swapping values between its
+entries, then breaks no constraint.
+
+The uniqueness holds within a resource type. Two resource types stored in two tables do not share
+their unique values.
 
 Update a resource
 -----------------
