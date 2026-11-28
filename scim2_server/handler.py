@@ -309,9 +309,9 @@ class ScimHandler:
         request the operation stands for.
         """
         if operation.method == BulkOperation.Method.post:
-            return self.storage.create(
-                resource_type, cast(Resource[Any], operation.data)
-            )
+            resource = cast(Resource[Any], operation.data)
+            self.service.check_unique_values(resource)
+            return self.storage.create(resource_type, resource)
 
         resource_id = cast(str, operation.resource_id)
         conditions = Conditions(if_match=operation.version)
@@ -649,9 +649,9 @@ class AsyncScimHandler:
         request the operation stands for.
         """
         if operation.method == BulkOperation.Method.post:
-            return await self.storage.create(
-                resource_type, cast(Resource[Any], operation.data)
-            )
+            resource = cast(Resource[Any], operation.data)
+            self.service.check_unique_values(resource)
+            return await self.storage.create(resource_type, resource)
 
         resource_id = cast(str, operation.resource_id)
         conditions = Conditions(if_match=operation.version)

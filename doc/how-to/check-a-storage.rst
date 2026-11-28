@@ -10,6 +10,8 @@ The suite checks what the method signatures do not tell: the copies, the 404 and
 the dates and versions, the uniqueness of ``userName``, and the filters, sorting and paging of
 the searches. It runs each filter and each sort of a list, and compares the answer of the
 storage with the rules of SCIM. It uses the ``User`` and ``Group`` resource types of :rfc:`RFC 7643 <7643>`.
+Run it on the database engine the application uses: a missing unique constraint then fails the
+tests of the uniqueness.
 
 Run the suite
 -------------
@@ -125,9 +127,8 @@ to :data:`False`.
 
 The suite checks the uniqueness of sub-attributes and of multi-valued attributes on
 :class:`~scim2_server.testing.Mailbox` resources. To run these tests, set
-:attr:`~scim2_server.testing.ScimStorageContract.stores_mailboxes` to :data:`True`, and serve the
-``Mailbox`` and ``SharedMailbox`` resource types. Both use the
-:class:`~scim2_server.testing.Mailbox` model.
+:attr:`~scim2_server.testing.ScimStorageContract.stores_mailboxes` to :data:`True`, and serve
+:data:`~scim2_server.testing.MAILBOX_TYPE`.
 
 A storage refuses a filter it cannot translate with :class:`~scim2_models.InvalidFilterException`,
 and a sort with :class:`~scim2_models.InvalidPathException`. The suite skips the filters and the

@@ -1,6 +1,32 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+Added
+^^^^^
+- :meth:`AsyncInMemoryStorage.generate_id <scim2_server.memory.AsyncInMemoryStorage.generate_id>`
+  can await, for instance to take the identifier of an account created in another service.
+- A resource holding the same unique value twice is refused with a 400.
+- :func:`~scim2_server.storage.uniqueness_conflict` builds a 409 whose detail tells the
+  attribute, never the value.
+
+Changed
+^^^^^^^
+- A unique value is unique within its resource type. A storage relies on the unique constraints
+  of its database. :data:`~scim2_server.testing.MAILBOX_TYPE` replaces ``MAILBOX_TYPES``.
+- :meth:`ResourceMapping.unique_attributes <scim2_server.mapping.ResourceMapping.unique_attributes>`
+  is public.
+- The in-memory storages call ``generate_id`` after the uniqueness checks, and it may return
+  ``None``. An identifier already taken gives a 409 instead of replacing the resource.
+  :class:`~scim2_server.memory.AsyncInMemoryStorage` no longer calls the ``create`` method of the
+  storage it serves.
+
+Removed
+^^^^^^^
+- ``scim2_server.storage.unique_values`` and ``scim2_server.mapping.filters.holds_any``.
+
 [0.10.0] - 2026-11-27
 ---------------------
 
@@ -9,7 +35,7 @@ Added
 - :class:`~scim2_server.testing.ScimStorageContract` checks the uniqueness of sub-attributes and
   of multi-valued attributes, for a storage setting
   :attr:`~scim2_server.testing.ScimStorageContract.stores_mailboxes`.
-  :func:`~scim2_server.storage.unique_values` lists the values a storage checks.
+  ``scim2_server.storage.unique_values`` lists the values a storage checks.
 
 Changed
 ^^^^^^^

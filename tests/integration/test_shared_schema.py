@@ -73,11 +73,12 @@ def test_a_shared_schema_is_published_once(wsgi):
     assert {rt["id"] for rt in resource_types} == {"User", "Group", "Admin"}
 
 
-@pytest.mark.parametrize("user_name", ["bjensen", "BJensen"])
-def test_uniqueness_spans_the_resource_types_sharing_a_schema(wsgi, user_name):
-    """RFC 7643 erratum 8279: uniqueness holds among the resources using the same schema."""
+def test_uniqueness_holds_within_each_resource_type(wsgi):
+    """A user and an admin may share a userName, but two admins may not."""
     wsgi.post("/v2/Users", json={"userName": "bjensen"})
-    r = wsgi.post("/v2/Admins", json={"userName": user_name})
+    assert wsgi.post("/v2/Admins", json={"userName": "bjensen"}).status_code == 201
+
+    r = wsgi.post("/v2/Admins", json={"userName": "BJensen"})
     assert r.status_code == 409
     assert r.json()["scimType"] == "uniqueness"
 

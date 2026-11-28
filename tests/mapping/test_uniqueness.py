@@ -11,17 +11,12 @@ from scim2_models import UniquenessException
 from scim2_server.mapping import Attribute
 from scim2_server.mapping import Entry
 from scim2_server.mapping import Link
-from scim2_server.testing import MAILBOX_TYPES
-from scim2_server.testing import Mailbox
-from scim2_server.testing import MailboxOwner
 
 from .backend import FakeStorage
 from .backend import Reference
 from .pets import Pet
 from .pets import pets
 from .pets import pets_mapping
-from .tables import MAILBOX_TABLES
-from .tables import mailbox_mapping
 
 
 class SoleOwner(ComplexAttribute):
@@ -80,28 +75,12 @@ def test_the_unique_attributes_are_those_clients_read():
     mapping = puppies_mapping({"name": Attribute(pets.fields["name"], writable=False)})
     FakeStorage({"Pet": mapping}, ScimProvider(models=[Puppy]))
 
-    assert sorted(mapping._unique_attributes()) == [
+    assert sorted(mapping.unique_attributes()) == [
         "urn:example:2.0:Pet:badges.value",
         "urn:example:2.0:Pet:name",
         "urn:example:2.0:Pet:owner.value",
         "urn:example:2.0:Pet:tags",
     ]
-
-
-def test_a_value_another_mapping_only_reads_is_taken():
-    """A unique value that the mapping of another resource type only reads clashes too."""
-    shared_mailboxes = MAILBOX_TABLES["SharedMailbox"][0]
-    owner = Attribute(shared_mailboxes.fields["owner"], writable=False)
-    mappings = {
-        "Mailbox": mailbox_mapping("Mailbox"),
-        "SharedMailbox": mailbox_mapping("SharedMailbox", {"owner.value": owner}),
-    }
-    provider = ScimProvider(models=[Mailbox], resource_types=MAILBOX_TYPES)
-    storage = FakeStorage(mappings, provider, version_key=b"key")
-    shared_mailboxes.insert(shared_mailboxes.new() | {"owner": "bjensen"})
-
-    with pytest.raises(UniquenessException):
-        storage.create(MAILBOX_TYPES[0], Mailbox(owner=MailboxOwner(value="BJensen")))
 
 
 def test_a_unique_link_value_is_taken_once(puppies):

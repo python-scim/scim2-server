@@ -11,15 +11,16 @@ from typing import cast
 from weakref import WeakKeyDictionary
 
 from scim2_models import AttributeBinding
+from scim2_models import Extension
 from scim2_models import Mutability
 from scim2_models import Path
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import Returned
-from scim2_models import ScimPolicy
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
+from scim2_models import UniquenessException
 
 from scim2_server.utils import parametrize
 
@@ -52,43 +53,53 @@ def projection(
     return {"response_parameters": response_parameters}
 
 
-def unique_values(
-    resource: Resource[Any], policy: ScimPolicy | None = None
-) -> dict[str, list[tuple[Any, Any]]]:
-    """Return the values of a resource that no other resource may hold, by the URN of their attribute.
+def uniqueness_conflict(attribute: AttributeBinding) -> UniquenessException:
+    """Return the 409 refusing a value that another resource holds, for one of the :meth:`~scim2_server.mapping.ResourceMapping.unique_attributes`.
 
-    The attributes are those whose uniqueness is ``server`` or ``global``,
-    at any depth, such as ``userName`` or ``emails.value``. Each value of a
-    multi-valued attribute counts on its own. A missing value is left out.
+    The detail tells the attribute, but never the value. An attribute of
+    the schema of the resource is told by its path, such as ``emails.value``.
+    An attribute of an extension is told by its URN.
 
-    Per RFC 7643 erratum 8279, the uniqueness applies to the resources using
-    the schema that declares the attribute, whatever their resource type. The
-    URN of an attribute holds its schema, so two resources clash when they
-    hold the same value under the same URN.
+    >>> from scim2_models import Path, User
+    >>> uniqueness_conflict(Path[User]("emails.value").resolve()).detail
+    'Uniqueness conflict with attribute emails.value'
+    """
+    return _uniqueness_conflict(_attribute_path(attribute))
 
-    Each value comes with the form it is compared in, as
-    :meth:`~scim2_models.AttributeBinding.comparable` returns it under the
-    policy. This form is :data:`None` when the policy cannot compare the
-    string: such a value clashes with no other value.
 
-    The values clients never read, such as a write-only one, are left out:
-    refusing one would tell that another resource holds it.
+def _attribute_path(attribute: AttributeBinding) -> str:
+    """Return the path of an attribute of the schema of the resource, or the URN of an attribute of an extension."""
+    if issubclass(attribute.model, Extension):
+        return attribute.urn
 
-    >>> from scim2_models import User
-    >>> unique_values(User(user_name="BJensen"))
-    {'urn:ietf:params:scim:schemas:core:2.0:User:userName': [('BJensen', 'bjensen')]}
+    return attribute.urn.rpartition(":")[2]
+
+
+def _uniqueness_conflict(path: str) -> UniquenessException:
+    return UniquenessException(detail=f"Uniqueness conflict with attribute {path}")
+
+
+def _unique_values(resource: Resource[Any]) -> dict[AttributeBinding, list[Any]]:
+    """Return the unique values of a resource, by attribute, in the form they are compared in.
+
+    The attributes are those whose uniqueness is server or global, at any
+    depth, and that clients read. Each value of a multi-valued attribute
+    counts on its own. A missing value is left out, and so is a value the
+    policy cannot compare: it is equal to no other value. A value that cannot
+    be hashed, such as a complex one, is held by its representation.
     """
     model_path = parametrize(Path, type(resource))
-    values: dict[str, list[tuple[Any, Any]]] = {}
+    values: dict[AttributeBinding, list[Any]] = {}
     for attribute in _unique_attributes(type(resource)):
         held = model_path(attribute.urn).get(resource, strict=False)
-        pairs = [
-            (value, _comparable(attribute, value, policy))
+        comparables = [
+            _hashable(comparable)
             for value in (held if isinstance(held, list) else [held])
             if value is not None
+            and (comparable := _comparable(attribute, value)) is not None
         ]
-        if pairs:
-            values[attribute.urn] = pairs
+        if comparables:
+            values[attribute] = comparables
 
     return values
 
@@ -130,13 +141,24 @@ def _hidden(attribute: AttributeBinding) -> bool:
     return Returned.never in returned or Mutability.write_only in mutability
 
 
-def _comparable(
-    attribute: AttributeBinding, value: Any, policy: ScimPolicy | None
-) -> Any:
+def _comparable(attribute: AttributeBinding, value: Any) -> Any:
     try:
-        return attribute.comparable(value, policy)
+        return attribute.comparable(value)
     except ValueError:
         return None
+
+
+def _hashable(value: Any) -> Any:
+    """Return a form of a value that a dict can hold as a key.
+
+    Lists and models cannot be hashed, so they are held by their
+    representation.
+    """
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
 
 
 @dataclass
@@ -230,10 +252,12 @@ class ScimStorage(ABC):
     - A value already taken by an attribute whose uniqueness is ``server`` or
       ``global`` raises :class:`~scim2_models.UniquenessException`. This
       holds for sub-attributes too, such as ``emails.value``. Each value of a
-      multi-valued attribute counts on its own, and :func:`unique_values`
-      lists them. Two equal values in the same resource do not clash, and
-      the values clients never read are not checked. A storage may let two
-      concurrent writes take the same value.
+      multi-valued attribute counts on its own. The uniqueness holds within
+      a resource type. A storage on a database relies on its unique
+      constraints, and turns their violations into the exception. The
+      constraint should find equal the values the filters find equal, and the
+      storage documents the differences. A resource keeping its values, or
+      swapping them between its entries, is written.
     - It supports what the :class:`~scim2_models.ServiceProviderConfig` of the
       server announces, such as sorting. The server refuses the rest before
       calling the storage.

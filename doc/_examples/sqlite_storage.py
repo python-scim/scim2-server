@@ -8,16 +8,20 @@ from typing import Any
 
 from scim2_models import Meta
 from scim2_models import NotFoundException
+from scim2_models import Path
 from scim2_models import PreconditionFailedException
 from scim2_models import Resource
 from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
-from scim2_models import UniquenessException
+from scim2_models import User
 
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
+from scim2_server.storage import uniqueness_conflict
+
+USER_NAME = Path[User]("userName").resolve()
 
 TABLE = """
 CREATE TABLE IF NOT EXISTS resources (
@@ -145,8 +149,10 @@ class SQLiteStorage(ScimStorage):
         try:
             with self.connection:
                 yield
-        except sqlite3.IntegrityError:
-            raise UniquenessException from None
+        except sqlite3.IntegrityError as error:
+            if error.sqlite_errorname != "SQLITE_CONSTRAINT_UNIQUE":
+                raise
+            raise uniqueness_conflict(USER_NAME) from None
 
     def search(
         self,

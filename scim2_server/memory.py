@@ -19,7 +19,6 @@ from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import ScimFilter
 from scim2_models import SearchRequest
-from scim2_models import UniquenessException
 from scim2_models.path import CompareOperator
 from scim2_models.path import Comparison
 
@@ -27,9 +26,11 @@ from scim2_server.keyset import Position
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
+from scim2_server.storage import _unique_values
+from scim2_server.storage import _uniqueness_conflict
 from scim2_server.storage import projection
 from scim2_server.storage import search_page
-from scim2_server.storage import unique_values
+from scim2_server.storage import uniqueness_conflict
 from scim2_server.utils import parametrize
 
 
@@ -163,26 +164,15 @@ def _equality(scim_filter: ScimFilter[Any] | None) -> AttributeBinding | None:
     return binding
 
 
-def _hashable(value: Any) -> Any:
-    """Return a form of a value that a dict can hold as a key.
-
-    Lists and models cannot be hashed, so they are held by their
-    representation.
-    """
-    try:
-        hash(value)
-    except TypeError:
-        return repr(value)
-    return value
-
-
 class InMemoryStorage(ScimStorage):
     """A storage keeping the resources in memory, for tests, debugging and demos.
 
-    It indexes the resources by identifier and the unique values. A search
-    walks every resource of the searched types, unless it compares a single
-    string attribute to a string with ``eq``. A lock serializes every access,
-    so it can serve a threaded server.
+    It indexes the resources by identifier and the unique values. A unique
+    value is unique within its resource type, as a database does with a
+    unique constraint on a table. A search walks every resource of the
+    searched types, unless it compares a single string attribute to a string
+    with ``eq``. A lock serializes every access, so it can serve a threaded
+    server.
 
     It indexes the values under the policy in effect when they were written,
     so it serves the resources of a single policy.
@@ -195,8 +185,8 @@ class InMemoryStorage(ScimStorage):
 
     def __init__(self, clock: Callable[[], datetime.datetime] = utcnow) -> None:
         self._resources: dict[str | None, dict[str, Resource[Any]]] = {}
-        self._owners: dict[str, dict[Any, Key]] = {}
-        self._unique_values: dict[Key, dict[str, set[Any]]] = {}
+        self._owners: dict[tuple[str | None, str], dict[Any, Key]] = {}
+        self._unique_values: dict[Key, dict[AttributeBinding, set[Any]]] = {}
         self._equalities: dict[
             str | None, dict[AttributeBinding, dict[Any, set[str]]]
         ] = {}
@@ -224,11 +214,13 @@ class InMemoryStorage(ScimStorage):
         for resource in resources:
             self._store(resource, self._values_of(resource))
 
-    def generate_id(self, resource_type: ResourceType, resource: Resource[Any]) -> str:
-        """Return the identifier of a new resource.
+    def generate_id(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> str | None:
+        """Return the identifier of a new resource, or :data:`None` to let the storage draw one.
 
-        Override this method to get predictable identifiers. The following
-        storage numbers the resources from 1:
+        Override this method to choose the identifiers. The following storage
+        numbers the resources from 1:
 
         >>> from itertools import count
         >>> class NumberedStorage(InMemoryStorage):
@@ -241,6 +233,11 @@ class InMemoryStorage(ScimStorage):
         >>> storage = NumberedStorage()
         >>> storage.generate_id(None, None), storage.generate_id(None, None)
         ('1', '2')
+
+        The storage calls it once for each new resource, after checking its
+        unique values, so a refused resource gets no identifier. An identifier
+        that another resource of the same resource type holds raises
+        :class:`~scim2_models.UniquenessException`.
         """
         return uuid.uuid4().hex
 
@@ -295,19 +292,9 @@ class InMemoryStorage(ScimStorage):
         self, resource_type: ResourceType, resource: Resource[Any]
     ) -> Resource[Any]:
         with self.lock:
-            resource = resource.model_copy(deep=True)
-            resource.id = self.generate_id(resource_type, resource)
-            now = self.clock()
-            resource.meta = Meta(
-                resource_type=resource_type.name,
-                created=now,
-                last_modified=now,
-                version=self.next_version(),
-            )
-            values = self._values_of(resource)
-            self._check_uniqueness(resource, values)
-            self._store(resource, values)
-            return resource.model_copy(deep=True)
+            resource = self._check_new(resource_type, resource)
+            resource_id = self.generate_id(resource_type, resource)
+            return self._insert(resource_type, resource, resource_id)
 
     def update(
         self,
@@ -330,7 +317,7 @@ class InMemoryStorage(ScimStorage):
                 }
             )
             values = self._values_of(updated)
-            self._check_uniqueness(updated, values)
+            self._check_uniqueness(_key(updated), values)
             self._store(updated, values)
             return updated.model_copy(deep=True)
 
@@ -391,14 +378,16 @@ class InMemoryStorage(ScimStorage):
         self._equal_values.setdefault(key, {})[binding] = value
         self._equalities[key[0]][binding].setdefault(value, set()).add(key[1])
 
-    def _store(self, resource: Resource[Any], values: dict[str, set[Any]]) -> None:
+    def _store(
+        self, resource: Resource[Any], values: dict[AttributeBinding, set[Any]]
+    ) -> None:
         """Keep a resource under its resource type and its identifier, and index its values."""
         key = _key(resource)
         self._remove(key)
         self._resources.setdefault(key[0], {})[key[1]] = resource
         self._unique_values[key] = values
-        for urn, held in values.items():
-            owners = self._owners.setdefault(urn, {})
+        for attribute, held in values.items():
+            owners = self._owners.setdefault((key[0], attribute.urn), {})
             for value in held:
                 owners[value] = key
 
@@ -408,8 +397,8 @@ class InMemoryStorage(ScimStorage):
     def _remove(self, key: Key) -> None:
         """Forget a resource and its indexed values."""
         self._resources.get(key[0], {}).pop(key[1], None)
-        for urn, held in self._unique_values.pop(key, {}).items():
-            owners = self._owners[urn]
+        for attribute, held in self._unique_values.pop(key, {}).items():
+            owners = self._owners[key[0], attribute.urn]
             for value in held:
                 if owners.get(value) == key:
                     del owners[value]
@@ -433,30 +422,69 @@ class InMemoryStorage(ScimStorage):
         if expected_version is not None and resource.meta.version != expected_version:
             raise PreconditionFailedException
 
+    def _check_new(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> Resource[Any]:
+        """Return a copy of a new resource, refusing a unique value another resource holds."""
+        with self.lock:
+            resource = resource.model_copy(deep=True)
+            self._check_uniqueness(
+                (resource_type.name, None), self._values_of(resource)
+            )
+            return resource
+
+    def _insert(
+        self,
+        resource_type: ResourceType,
+        resource: Resource[Any],
+        resource_id: str | None,
+    ) -> Resource[Any]:
+        """Store a new resource under an identifier.
+
+        The unique values are checked again: generate_id may have changed the
+        resource, and another resource may have taken a value meanwhile.
+        """
+        with self.lock:
+            if resource_id is None:
+                resource_id = uuid.uuid4().hex
+
+            if resource_id in self._resources.get(resource_type.name, {}):
+                raise _uniqueness_conflict("id")
+
+            values = self._values_of(resource)
+            self._check_uniqueness((resource_type.name, resource_id), values)
+            resource.id = resource_id
+            now = self.clock()
+            resource.meta = Meta(
+                resource_type=resource_type.name,
+                created=now,
+                last_modified=now,
+                version=self.next_version(),
+            )
+            self._store(resource, values)
+            return resource.model_copy(deep=True)
+
     def _check_uniqueness(
-        self, resource: Resource[Any], values: dict[str, set[Any]]
+        self,
+        key: tuple[str | None, str | None],
+        values: dict[AttributeBinding, set[Any]],
     ) -> None:
-        """Refuse a resource sharing a unique value with another resource."""
-        key = _key(resource)
-        for urn, held in values.items():
-            owners = self._owners.get(urn, {})
+        """Refuse the unique values that another resource of the type of key holds."""
+        for attribute, held in values.items():
+            owners = self._owners.get((key[0], attribute.urn), {})
             if any(owners.get(value, key) != key for value in held):
-                raise UniquenessException()
+                raise uniqueness_conflict(attribute)
 
-    def _values_of(self, resource: Resource[Any]) -> dict[str, set[Any]]:
-        """Return the unique values of a resource, by the URN of their attribute.
+    @staticmethod
+    def _values_of(resource: Resource[Any]) -> dict[AttributeBinding, set[Any]]:
+        """Return the unique values of a resource, by attribute.
 
-        A value the policy cannot compare never clashes, as a missing value
-        does not. The values are compared under the policy of the write that
-        stored them, so a storage serves the resources of a single policy.
+        The values are compared under the policy of the write that stored
+        them, so a storage serves the resources of a single policy.
         """
         return {
-            urn: {
-                _hashable(comparable)
-                for _, comparable in pairs
-                if comparable is not None
-            }
-            for urn, pairs in unique_values(resource).items()
+            attribute: set(values)
+            for attribute, values in _unique_values(resource).items()
         }
 
     @staticmethod
@@ -480,13 +508,18 @@ class AsyncInMemoryStorage(AsyncScimStorage):
     """The asynchronous variant of :class:`InMemoryStorage`.
 
     It serves the resources of an :class:`InMemoryStorage`. Every call runs
-    without awaiting anything, so a call is never interrupted by another
-    coroutine. :meth:`~scim2_server.storage.AsyncScimStorage.operation` takes no lock: holding the lock of the
-    storage across an ``await`` would block the event loop. Two concurrent
-    updates of a resource are still told apart by ``expected_version``.
+    without awaiting anything but :meth:`generate_id`, so a call is never
+    interrupted by another coroutine while it reads or writes the resources.
+    :meth:`~scim2_server.storage.AsyncScimStorage.operation` takes no lock:
+    holding the lock of the storage across an ``await`` would block the event
+    loop. Two concurrent updates of a resource are still told apart by
+    ``expected_version``.
 
-    :param storage: The storage to serve. Pass a subclass of
-        :class:`InMemoryStorage` to change how identifiers are generated.
+    :param storage: The storage to serve. Its
+        :meth:`~InMemoryStorage.generate_id` gives the identifiers, unless
+        :meth:`generate_id` is overridden. Its other methods serve the
+        requests, except ``create``: a new resource goes through
+        :meth:`generate_id` instead.
     """
 
     supports_cursors = True
@@ -521,10 +554,27 @@ class AsyncInMemoryStorage(AsyncScimStorage):
     ) -> SearchPage:
         return search_page(self.storage, resource_types, search_request, position)
 
+    async def generate_id(
+        self, resource_type: ResourceType, resource: Resource[Any]
+    ) -> str | None:
+        """Return the identifier of a new resource, or :data:`None` to let the storage draw one.
+
+        It returns what :meth:`InMemoryStorage.generate_id` returns. Override
+        it with an ``async def`` method to choose the identifiers. It can
+        await, for instance to create the account in another service and take
+        its identifier. The storage checks the unique values
+        again once it returns. A write refused then, because another resource
+        took a value in the meantime, does not undo what the method did.
+        """
+        with self.storage.lock:
+            return self.storage.generate_id(resource_type, resource)
+
     async def create(
         self, resource_type: ResourceType, resource: Resource[Any]
     ) -> Resource[Any]:
-        return self.storage.create(resource_type, resource)
+        resource = self.storage._check_new(resource_type, resource)
+        resource_id = await self.generate_id(resource_type, resource)
+        return self.storage._insert(resource_type, resource, resource_id)
 
     async def update(
         self,

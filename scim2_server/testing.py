@@ -186,15 +186,13 @@ class Mailbox(Resource[Any]):
     owner: MailboxOwner | None = None
 
 
-MAILBOX_TYPES = [
-    ResourceType(
-        id=name,
-        name=name,
-        endpoint=Reference[URI](f"/{name}es"),
-        schema_=Reference[URI](str(Mailbox.__schema__)),
-    )
-    for name in ("Mailbox", "SharedMailbox")
-]
+MAILBOX_TYPE = ResourceType(
+    id="Mailbox",
+    name="Mailbox",
+    endpoint=Reference[URI]("/Mailboxes"),
+    schema_=Reference[URI](str(Mailbox.__schema__)),
+)
+"""The resource type of the :class:`Mailbox` resources, served at ``/Mailboxes``."""
 
 
 class ScimStorageContract:
@@ -242,10 +240,9 @@ class ScimStorageContract:
     """Whether the storage stores the :class:`Mailbox` resources.
 
     Set it to :data:`True` to check the uniqueness of sub-attributes and of
-    multi-valued attributes. The storage then serves the ``Mailbox`` and
-    ``SharedMailbox`` resource types, which share the schema of
-    :class:`Mailbox`. The tests of the uniqueness across resource types use
-    them. The ``provider`` fixture serves them too.
+    multi-valued attributes. The storage then serves the ``Mailbox``
+    resource type, :data:`MAILBOX_TYPE`. The ``provider`` fixture serves it
+    too.
     """
 
     @pytest.fixture
@@ -257,7 +254,7 @@ class ScimStorageContract:
 
         return ScimProvider(
             models=[*provider.models, Mailbox],
-            resource_types=[*provider.resource_types, *MAILBOX_TYPES],
+            resource_types=[*provider.resource_types, MAILBOX_TYPE],
             config=provider.config,
             policy=provider.policy,
         )
@@ -274,11 +271,6 @@ class ScimStorageContract:
     def mailbox_type(self, provider: ScimProvider) -> ResourceType:
         self.require(self.stores_mailboxes, "mailboxes")
         return next(rt for rt in provider.resource_types if rt.id == "Mailbox")
-
-    @pytest.fixture
-    def shared_mailbox_type(self, provider: ScimProvider) -> ResourceType:
-        self.require(self.stores_mailboxes, "mailboxes")
-        return next(rt for rt in provider.resource_types if rt.id == "SharedMailbox")
 
     @pytest.fixture
     def user_model(
@@ -667,11 +659,17 @@ class ScimStorageContract:
     def test_create_with_a_taken_unique_value(
         self, storage: Any, user_type: ResourceType, user_model: Any
     ) -> None:
-        """A userName already taken, whatever its case, raises a 409 on creation."""
+        """A userName already taken, whatever its case, raises a 409 on creation.
+
+        The detail tells the attribute, as
+        :func:`~scim2_server.storage.uniqueness_conflict` writes it, and
+        never the value.
+        """
         self.create_users(storage, user_type, user_model, "bjensen")
 
-        with pytest.raises(UniquenessException):
+        with pytest.raises(UniquenessException) as conflict:
             storage.create(user_type, user_model(user_name="BJensen"))
+        assert conflict.value.detail == "Uniqueness conflict with attribute userName"
 
     def test_update_with_a_taken_unique_value(
         self, storage: Any, user_type: ResourceType, user_model: Any
@@ -729,7 +727,7 @@ class ScimStorageContract:
     def test_update_with_a_taken_unique_value_in_a_list(
         self, storage: Any, mailbox_type: ResourceType
     ) -> None:
-        """A unique sub-attribute value taken by another resource raises a 409 on update."""
+        """A unique sub-attribute value taken by another resource raises a 409 on update, telling the sub-attribute."""
         storage.create(
             mailbox_type,
             Mailbox(addresses=[MailboxAddress(value="bjensen@example.com")]),
@@ -742,8 +740,12 @@ class ScimStorageContract:
             MailboxAddress(value="bjensen@example.com"),
         ]
 
-        with pytest.raises(UniquenessException):
+        with pytest.raises(UniquenessException) as conflict:
             storage.update(mailbox_type, mailbox)
+        assert (
+            conflict.value.detail
+            == "Uniqueness conflict with attribute addresses.value"
+        )
         stored = storage.get(mailbox_type, mailbox.id)
         assert [address.value for address in stored.addresses] == ["babs@example.com"]
 
@@ -774,28 +776,6 @@ class ScimStorageContract:
 
         with pytest.raises(UniquenessException):
             storage.create(mailbox_type, Mailbox(aliases=["babs"]))
-
-    def test_a_resource_repeats_a_unique_value(
-        self, storage: Any, mailbox_type: ResourceType
-    ) -> None:
-        """Two equal unique values in the same resource do not clash, and the storage keeps both."""
-        mailbox = storage.create(
-            mailbox_type,
-            Mailbox(
-                addresses=[
-                    MailboxAddress(value="bjensen@example.com", type="work"),
-                    MailboxAddress(value="bjensen@example.com", type="home"),
-                ],
-                aliases=["babs", "babs"],
-            ),
-        )
-
-        stored = storage.get(mailbox_type, mailbox.id)
-        assert [address.value for address in stored.addresses] == [
-            "bjensen@example.com",
-            "bjensen@example.com",
-        ]
-        assert stored.aliases == ["babs", "babs"]
 
     def test_missing_unique_values_do_not_clash(
         self, storage: Any, mailbox_type: ResourceType
@@ -874,46 +854,12 @@ class ScimStorageContract:
     def test_unique_values_of_different_attributes_do_not_clash(
         self, storage: Any, mailbox_type: ResourceType
     ) -> None:
-        """A unique value only clashes with the values of its own attribute.
-
-        Per RFC 7643 erratum 8279, the uniqueness applies to an attribute of a
-        schema.
-        """
+        """A unique value only clashes with the values of its own attribute."""
         storage.create(
             mailbox_type, Mailbox(addresses=[MailboxAddress(value="bjensen")])
         )
         storage.create(mailbox_type, Mailbox(aliases=["bjensen"]))
         storage.create(mailbox_type, Mailbox(owner=MailboxOwner(value="bjensen")))
-
-    def test_unique_values_across_resource_types(
-        self,
-        storage: Any,
-        mailbox_type: ResourceType,
-        shared_mailbox_type: ResourceType,
-    ) -> None:
-        """A unique value taken by a resource of another type sharing the schema raises a 409.
-
-        Per RFC 7643 erratum 8279, the uniqueness applies to the resources using
-        the schema, whatever their resource type.
-        """
-        storage.create(
-            mailbox_type, Mailbox(addresses=[MailboxAddress(value="babs@example.com")])
-        )
-        storage.create(
-            shared_mailbox_type,
-            Mailbox(addresses=[MailboxAddress(value="team@example.com")]),
-        )
-
-        with pytest.raises(UniquenessException):
-            storage.create(
-                shared_mailbox_type,
-                Mailbox(addresses=[MailboxAddress(value="babs@example.com")]),
-            )
-        with pytest.raises(UniquenessException):
-            storage.create(
-                mailbox_type,
-                Mailbox(addresses=[MailboxAddress(value="team@example.com")]),
-            )
 
     def test_search_a_resource_type(
         self,

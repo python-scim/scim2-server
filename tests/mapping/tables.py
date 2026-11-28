@@ -57,31 +57,25 @@ groups.field("last_modified")
 groups.field("version", null=False, default=1)
 
 
-def mailbox_tables(name):
-    """Return the tables of a mailbox, its addresses and its aliases."""
-    mailboxes = Table(name)
-    for field in ("display_name", "owner", "owner_name"):
-        mailboxes.field(field)
+mailboxes = Table("mailboxes")
+for name in ("display_name", "owner", "owner_name"):
+    mailboxes.field(name)
 
-    addresses = Table(f"{name}_addresses")
-    addresses.field("mailbox", null=False)
-    addresses.field("value")
-    addresses.field("type")
-    aliases = Table(f"{name}_aliases")
-    aliases.field("mailbox", null=False)
-    aliases.field("value")
-    return mailboxes, addresses, aliases
-
-
-MAILBOX_TABLES = {
-    name: mailbox_tables(name.lower()) for name in ("Mailbox", "SharedMailbox")
-}
+addresses = Table("addresses")
+addresses.field("mailbox", null=False)
+addresses.field("value")
+addresses.field("type")
+aliases = Table("aliases")
+aliases.field("mailbox", null=False)
+aliases.field("value")
 
 TABLES = (
     users,
     emails,
     groups,
-    *(t for tables in MAILBOX_TABLES.values() for t in tables),
+    mailboxes,
+    addresses,
+    aliases,
 )
 
 DEFAULT = object()
@@ -162,8 +156,7 @@ WORK_EMAIL = {
 UNDATED = {"meta.created": None, "meta.lastModified": None}
 
 
-def mailbox_mapping(name, changes=None):
-    mailboxes, addresses, aliases = MAILBOX_TABLES[name]
+def mailbox_mapping(changes=None):
     attributes = {
         "id": mailboxes.id,
         "displayName": mailboxes.fields["display_name"],

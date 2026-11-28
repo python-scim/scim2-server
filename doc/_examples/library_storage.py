@@ -16,6 +16,7 @@ from scim2_models import Meta
 from scim2_models import Mutability
 from scim2_models import Name
 from scim2_models import NotFoundException
+from scim2_models import Path
 from scim2_models import PreconditionFailedException
 from scim2_models import Required
 from scim2_models import Resource
@@ -23,11 +24,11 @@ from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import SearchRequest
 from scim2_models import Uniqueness
-from scim2_models import UniquenessException
 from scim2_models import User
 
 from scim2_server.storage import ScimStorage
 from scim2_server.storage import SearchPage
+from scim2_server.storage import uniqueness_conflict
 
 MEMBERS = """
 CREATE TABLE IF NOT EXISTS members (
@@ -47,7 +48,7 @@ BOOKS = """
 CREATE TABLE IF NOT EXISTS books (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
-    isbn TEXT UNIQUE,
+    isbn TEXT UNIQUE COLLATE NOCASE,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -66,6 +67,19 @@ class Book(Resource):
 
 
 Member = User[LibraryMember]
+
+UNIQUE_COLUMNS = {
+    "members.login": Path[Member]("userName").resolve(),
+    "books.isbn": Path[Book]("isbn").resolve(),
+}
+
+
+def uniqueness_conflict_of(error: sqlite3.IntegrityError) -> Exception:
+    """Return the 409 of a violated UNIQUE constraint, or the error itself for another constraint."""
+    if error.sqlite_errorname != "SQLITE_CONSTRAINT_UNIQUE":
+        return error
+    column = str(error).removeprefix("UNIQUE constraint failed: ")
+    return uniqueness_conflict(UNIQUE_COLUMNS[column])
 
 
 def meta(resource_type: str, row: sqlite3.Row) -> Meta:
@@ -230,8 +244,8 @@ class LibraryStorage(ScimStorage):
         try:
             with self.connection:
                 yield
-        except sqlite3.IntegrityError:
-            raise UniquenessException from None
+        except sqlite3.IntegrityError as error:
+            raise uniqueness_conflict_of(error) from None
 
     def search(
         self,

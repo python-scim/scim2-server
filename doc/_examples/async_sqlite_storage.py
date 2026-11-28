@@ -15,11 +15,12 @@ from scim2_models import ResourceType
 from scim2_models import ResponseParameters
 from scim2_models import ScimProvider
 from scim2_models import SearchRequest
-from scim2_models import UniquenessException
 
 from doc._examples.sqlite_storage import TABLE
+from doc._examples.sqlite_storage import USER_NAME
 from scim2_server.storage import AsyncScimStorage
 from scim2_server.storage import SearchPage
+from scim2_server.storage import uniqueness_conflict
 
 
 class AsyncSQLiteStorage(AsyncScimStorage):
@@ -149,9 +150,11 @@ class AsyncSQLiteStorage(AsyncScimStorage):
         try:
             yield connection
             await connection.commit()
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as error:
             await connection.rollback()
-            raise UniquenessException from None
+            if error.sqlite_errorname != "SQLITE_CONSTRAINT_UNIQUE":
+                raise
+            raise uniqueness_conflict(USER_NAME) from None
 
     async def search(
         self,
